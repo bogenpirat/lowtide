@@ -398,15 +398,16 @@ pub static DE: Strings = Strings {
     cli_stale: " [antwortet nicht]",
 };
 
-/// Schwäbisch: understandable to any German speaker, but unmistakably from
-/// somewhere between Stuttgart and Ulm.
+/// Schwäbisch, leaning towards the Upper Swabian spoken around Biberach an der
+/// Riß (e.g. "it" for "nicht", "geit" for "gibt"). Understandable to any
+/// German speaker.
 pub static SWABIAN: Strings = Strings {
     charge_discharging: "wird leerer",
     charge_charging: "lädt grad",
     charge_full: "proppavoll",
-    charge_not_charging: "lädt ned",
+    charge_not_charging: "lädt it",
     charge_error: "Ladefehler – so a Glomp",
-    charge_unknown: "woiß mr ned",
+    charge_unknown: "woiß mr it",
     connection_wired: "am Kabel (USB)",
     connection_receiver: "ohne Kabel (Empfänger {pid}, Plätzle {slot})",
 
@@ -414,8 +415,8 @@ pub static SWABIAN: Strings = Strings {
     info_no_devices: "Koi Grät mit Akku gfonda",
     info_external_power: ", hängt am Strom",
     info_no_battery: "koi Ahnung vom Akku",
-    info_not_responding: "gibt koi Antwort",
-    info_not_responding_since: "gibt koi Antwort, zletzt glesa vor {ago}",
+    info_not_responding: "geit koi Antwort",
+    info_not_responding_since: "geit koi Antwort, zletscht glesa vor {ago}",
     info_firmware: "Firmware {version}",
     duration_seconds: "{s} Sekonda",
     duration_minutes: "{m} Minuta",
@@ -424,34 +425,34 @@ pub static SWABIAN: Strings = Strings {
     tray_scanning: "Lowtide: guckt nach Grät…",
     tray_no_devices: "Lowtide: koine Grät gfonda",
     tray_device: "{device}: {percent} % ({status})",
-    tray_not_responding: ", gibt koi Antwort",
+    tray_not_responding: ", geit koi Antwort",
     menu_status: "Akku azeiga",
     menu_refresh: "Glei nomol gucka",
     menu_settings: "Eistellunga…",
-    menu_quit: "Lowtide: Feierabend",
+    menu_quit: "Lowtide: Feierobed",
     menu_mute: "S Meckra abstella",
     tray_muted: "Lowtide (Meckra abgstellt)",
     notify_config_error: "Lowtide: D Eistellungsdatei isch hee, mir nemmet dr Standard",
-    notify_hotkey_unavailable: "Lowtide: Des Tastakürzel goht ned",
+    notify_hotkey_unavailable: "Lowtide: Des Tastakürzel goht it",
     hotkey_in_use: "{hotkey} hot scho a anders Programm",
     app_busy: "Lowtide isch grad am Schaffa, probier's nomol.",
-    autostart_failed: "Autostart hot ned klappt: {error}",
-    save_failed: "D Eistellunga ließet se ned speichra: {error}",
-    start_failed: "Lowtide kommt ned en d Gäng:\n{error}",
+    autostart_failed: "Autostart hot it klappt: {error}",
+    save_failed: "D Eistellunga ließet se it speichra: {error}",
+    start_failed: "Lowtide kommt it en d Gäng:\n{error}",
 
     sample_device: "Beispielmäusle",
     simulated_device: "Simuliert's Mäusle",
     generic_logitech_device: "Logitech-Grät",
 
     hotkey_two_keys: "z'viel Tasta en „{hotkey}“",
-    hotkey_unknown_key: "dia Tast „{key}“ kenn i ned",
+    hotkey_unknown_key: "dia Tast „{key}“ kenn i it",
     hotkey_no_key: "koi Tast en „{hotkey}“",
-    hotkey_needs_modifier: "a Tastakürzel brauchd Strg, Alt oder Win",
+    hotkey_needs_modifier: "a Tastakürzel braucht Strg, Alt oder Win",
 
     dlg_title: "Lowtide-Eistellunga",
     dlg_general: "Allgemoi",
     dlg_threshold: "Meckra, wenn dr Akku onder",
-    dlg_suppress: "Beim Lada ned meckra",
+    dlg_suppress: "Beim Lada it meckra",
     dlg_poll: "Akku gucka älle",
     dlg_seconds: "Sekonda",
     dlg_hotkey: "Tastakürzel für Status",
@@ -477,7 +478,7 @@ pub static SWABIAN: Strings = Strings {
     dlg_ok: "Passt",
     dlg_cancel: "Lass bleiba",
     dlg_apply: "Ü&bernemma",
-    dlg_open_failed: "S Eistellungsfenschter goht ned uff: {error}",
+    dlg_open_failed: "S Eistellungsfenschter goht it uf: {error}",
     anchor_top_left: "Oba links",
     anchor_top: "Oba",
     anchor_top_right: "Oba rechts",
@@ -500,7 +501,7 @@ pub static SWABIAN: Strings = Strings {
     weight_black: "schwarz",
     err_range: "{field} muss a ganze Zahl vo {min} bis {max} sei.",
     err_hotkey: "Tastakürzel: {error}.",
-    err_message_empty: "D Meldong derf ned leer sei.",
+    err_message_empty: "D Meldong derf it leer sei.",
     field_threshold: "D Meckergrenz",
     field_poll: "Dr Guckabstand",
     field_alert_margin: "Dr Abstand vom Meckra",
@@ -519,7 +520,7 @@ pub static SWABIAN: Strings = Strings {
     cli_no_devices: "koine Grät",
     cli_device_line: "{device} über {connection}: {battery}",
     cli_estimated: " (gschätzt)",
-    cli_stale: " [gibt koi Antwort]",
+    cli_stale: " [geit koi Antwort]",
 };
 
 #[cfg(test)]
