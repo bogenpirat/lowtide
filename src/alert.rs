@@ -1,0 +1,214 @@
+//! What the overlays say: which devices are in alert (with hysteresis) and
+//! the text of the alert and of the on-demand info popup. No UI code here.
+
+use std::collections::BTreeSet;
+use std::time::SystemTime;
+
+use crate::config::Config;
+use crate::model::{DeviceId, DeviceState, Snapshot};
+
+/// A device enters alert below the threshold and leaves only once it is this
+/// many points above it, so voltage noise cannot make the alert flicker.
+pub const HYSTERESIS_PERCENT: u8 = 2;
+
+#[derive(Default)]
+pub struct AlertState {
+    alerting: BTreeSet<DeviceId>,
+}
+
+impl AlertState {
+    /// Update from a new snapshot; returns the devices currently in alert.
+    pub fn update<'a>(&mut self, snap: &'a Snapshot, cfg: &Config) -> Vec<&'a DeviceState> {
+        let mut now = BTreeSet::new();
+        for d in &snap.devices {
+            let Some(b) = &d.battery else { continue };
+            let charging = b.charge.is_charging() || b.external_power;
+            if cfg.suppress_while_charging && charging {
+                continue;
+            }
+            let was = self.alerting.contains(&d.id);
+            let exit_level = cfg.threshold_percent.saturating_add(HYSTERESIS_PERCENT);
+            let alert = b.percent < cfg.threshold_percent || (was && b.percent < exit_level);
+            if alert {
+                now.insert(d.id.clone());
+            }
+        }
+        self.alerting = now;
+        snap.devices.iter().filter(|d| self.alerting.contains(&d.id)).collect()
+    }
+}
+
+/// Alert text: the configured template, one line per device in alert.
+pub fn alert_text(template: &str, devices: &[&DeviceState]) -> String {
+    devices
+        .iter()
+        .map(|d| {
+            let b = d.battery.as_ref();
+            template
+                .replace("{device}", &d.name)
+                .replace("{percent}", &b.map_or("?".into(), |b| b.percent.to_string()))
+                .replace("{status}", b.map_or("unknown", |b| b.charge.label()))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Info popup text: everything worth knowing about every device.
+pub fn info_text(snap: &Snapshot, now: SystemTime) -> String {
+    if snap.devices.is_empty() {
+        return "No battery-powered devices found".into();
+    }
+    let blocks: Vec<String> = snap
+        .devices
+        .iter()
+        .map(|d| {
+            let mut lines = Vec::new();
+            match &d.battery {
+                Some(b) => {
+                    let approx = if b.estimated { "~" } else { "" };
+                    lines.push(format!("{}  {approx}{}%", d.name, b.percent));
+                    let mut status = b.charge.label().to_string();
+                    if b.external_power && !b.charge.is_charging() {
+                        status.push_str(", on external power");
+                    }
+                    lines.push(format!("{status} · {}", d.connection.label()));
+                    if let Some(mv) = b.millivolts {
+                        lines.push(format!("{:.2} V", f32::from(mv) / 1000.0));
+                    }
+                }
+                None => {
+                    lines.push(d.name.clone());
+                    lines.push(format!("no battery information · {}", d.connection.label()));
+                }
+            }
+            if d.stale {
+                let ago = d.last_update.and_then(|t| now.duration_since(t).ok());
+                lines.push(match ago {
+                    Some(a) => format!("not responding, last read {} ago", human_duration(a.as_secs())),
+                    None => "not responding".into(),
+                });
+            }
+            if let Some((_, fw)) = d.details.iter().find(|(k, _)| k == "Firmware") {
+                lines.push(format!("Firmware {fw}"));
+            }
+            lines.join("\n")
+        })
+        .collect();
+    blocks.join("\n\n")
+}
+
+fn human_duration(secs: u64) -> String {
+    match secs {
+        0..=59 => format!("{secs} s"),
+        60..=3599 => format!("{} min", secs / 60),
+        _ => format!("{} h {} min", secs / 3600, secs % 3600 / 60),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+    use crate::model::{BatteryInfo, ChargeState, Connection};
+
+    fn device(name: &str, percent: u8, charge: ChargeState) -> DeviceState {
+        DeviceState {
+            id: DeviceId { source: "t", key: name.into() },
+            name: name.into(),
+            kind: Some("mouse".into()),
+            connection: Connection::Receiver { receiver_pid: 0xC543, slot: 1 },
+            battery: Some(BatteryInfo::new(percent, charge)),
+            last_update: None,
+            stale: false,
+            details: vec![("Firmware".into(), "MPM 31.04.B0012".into())],
+        }
+    }
+
+    fn snap(devices: Vec<DeviceState>) -> Snapshot {
+        Snapshot { devices }
+    }
+
+    fn alerting(state: &mut AlertState, devices: Vec<DeviceState>, cfg: &Config) -> Vec<String> {
+        let s = snap(devices);
+        state.update(&s, cfg).iter().map(|d| d.name.clone()).collect()
+    }
+
+    #[test]
+    fn alert_below_threshold_with_hysteresis() {
+        let cfg = Config { threshold_percent: 15, ..Config::default() };
+        let mut st = AlertState::default();
+        let d = |p| vec![device("m", p, ChargeState::Discharging)];
+        assert!(alerting(&mut st, d(15), &cfg).is_empty());
+        assert_eq!(alerting(&mut st, d(14), &cfg), ["m"]);
+        // Noise back to 15/16 keeps the alert; 17 (= threshold + 2) clears it.
+        assert_eq!(alerting(&mut st, d(15), &cfg), ["m"]);
+        assert_eq!(alerting(&mut st, d(16), &cfg), ["m"]);
+        assert!(alerting(&mut st, d(17), &cfg).is_empty());
+        // And it does not re-enter at 16.
+        assert!(alerting(&mut st, d(16), &cfg).is_empty());
+    }
+
+    #[test]
+    fn charging_suppresses_alert_when_configured() {
+        let mut cfg = Config { threshold_percent: 15, ..Config::default() };
+        let mut st = AlertState::default();
+        let charging = vec![device("m", 5, ChargeState::Charging)];
+        assert!(alerting(&mut st, charging.clone(), &cfg).is_empty());
+        cfg.suppress_while_charging = false;
+        assert_eq!(alerting(&mut st, charging, &cfg), ["m"]);
+    }
+
+    #[test]
+    fn threshold_zero_never_alerts_and_100_always_does() {
+        let mut st = AlertState::default();
+        let low = vec![device("m", 0, ChargeState::Discharging)];
+        let cfg0 = Config { threshold_percent: 0, ..Config::default() };
+        assert!(alerting(&mut st, low.clone(), &cfg0).is_empty());
+        let cfg100 = Config { threshold_percent: 100, ..Config::default() };
+        let full = vec![device("m", 99, ChargeState::Discharging)];
+        assert_eq!(alerting(&mut st, full, &cfg100), ["m"]);
+    }
+
+    #[test]
+    fn stale_devices_keep_alerting_on_last_value() {
+        let cfg = Config::default();
+        let mut st = AlertState::default();
+        let mut d = device("m", 5, ChargeState::Discharging);
+        d.stale = true;
+        assert_eq!(alerting(&mut st, vec![d], &cfg), ["m"]);
+    }
+
+    #[test]
+    fn alert_text_fills_placeholders_per_device() {
+        let a = device("G903", 9, ChargeState::Discharging);
+        let b = device("PRO 2", 4, ChargeState::Discharging);
+        let text = alert_text("{device}: {percent}% ({status})", &[&a, &b]);
+        assert_eq!(text, "G903: 9% (discharging)\nPRO 2: 4% (discharging)");
+    }
+
+    #[test]
+    fn info_text_lists_details() {
+        let mut d = device("PRO 2 LIGHTSPEED", 84, ChargeState::Discharging);
+        d.battery.as_mut().unwrap().estimated = true;
+        d.battery.as_mut().unwrap().millivolts = Some(3811);
+        let text = info_text(&snap(vec![d]), SystemTime::now());
+        assert_eq!(
+            text,
+            "PRO 2 LIGHTSPEED  ~84%\n\
+             discharging · wireless (receiver C543, slot 1)\n\
+             3.81 V\n\
+             Firmware MPM 31.04.B0012"
+        );
+    }
+
+    #[test]
+    fn info_text_reports_stale_age() {
+        let now = SystemTime::now();
+        let mut d = device("m", 50, ChargeState::Discharging);
+        d.stale = true;
+        d.last_update = Some(now - Duration::from_secs(185));
+        assert!(info_text(&snap(vec![d]), now).contains("not responding, last read 3 min ago"));
+        assert_eq!(info_text(&Snapshot::default(), now), "No battery-powered devices found");
+    }
+}
