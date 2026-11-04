@@ -7,6 +7,7 @@ use serde::Serialize;
 use windows::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
 
 use crate::model::{DeviceState, Snapshot};
+use crate::monitor::Monitor;
 use crate::sources;
 
 #[derive(Serialize)]
@@ -65,11 +66,39 @@ pub fn scan_once() -> Snapshot {
     snap
 }
 
-pub fn run() -> i32 {
+fn attach_console() {
     // GUI-subsystem binary: borrow the parent console so output is visible.
     unsafe {
         let _ = AttachConsole(ATTACH_PARENT_PROCESS);
     }
+}
+
+/// `lowtide --watch [seconds]`: run the real monitor and print one line per
+/// published change (events, polls). Useful to verify push notifications.
+pub fn watch(poll_secs: u64) -> i32 {
+    attach_console();
+    let started = std::time::Instant::now();
+    let _monitor = Monitor::spawn(sources::all(), Duration::from_secs(poll_secs), move |snap| {
+        let t = started.elapsed().as_secs_f32();
+        if snap.devices.is_empty() {
+            println!("[{t:8.1}s] no devices");
+        }
+        for d in &snap.devices {
+            let battery = d.battery.as_ref().map_or("no battery info".to_string(), |b| {
+                format!("{}%{} {}", b.percent, if b.estimated { " (est.)" } else { "" }, b.charge.label())
+            });
+            let stale = if d.stale { " [stale]" } else { "" };
+            println!("[{t:8.1}s] {} via {}: {battery}{stale}", d.name, d.connection.label());
+        }
+    });
+    eprintln!("watching (poll every {poll_secs} s), Ctrl+C to stop");
+    loop {
+        std::thread::park();
+    }
+}
+
+pub fn run() -> i32 {
+    attach_console();
     let started = SystemTime::now();
     let snap = scan_once();
     let report: Vec<DeviceReport> = snap.devices.iter().map(DeviceReport::from).collect();
