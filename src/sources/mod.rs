@@ -2,6 +2,7 @@
 //! registered source through [`BatterySource`] and never sees vendor details.
 
 pub mod logitech_hidpp;
+pub mod simulated;
 
 use windows::Win32::Foundation::HANDLE;
 
