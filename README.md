@@ -35,9 +35,16 @@ once, as wired. The two paths are matched by the device's unit ID.
 Run `lowtide.exe`. It lives in the notification area:
 
 - **Left-click** the tray icon, or press the hotkey, to show the status popup.
-- **Right-click** for *Show battery status*, *Refresh now*, *Settings…* and *Quit*.
+- **Right-click** for *Show battery status*, *Refresh now*, *Mute low-battery
+  alert*, *Settings…* and *Quit*.
 - The tray icon shows the lowest charge. It is blue normally, green while
-  charging and red in alert.
+  charging and red in alert. It stays red while the alert is muted.
+
+**Muting** hides the alert overlay for the devices that are low right now.
+The mute ends once the device has been charged back above the threshold, so
+the next time it runs low, the alert comes back. A short top-up that stays
+below the threshold keeps it muted. Click the entry again to unmute early.
+Mute is never saved: after a restart, a low battery alerts again.
 
 The low-battery alert and the status popup are independent. The popup never
 hides an active alert.

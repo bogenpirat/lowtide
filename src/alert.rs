@@ -12,30 +12,64 @@ use crate::model::{DeviceId, DeviceState, Snapshot};
 /// many points above it, so voltage noise cannot make the alert flicker.
 pub const HYSTERESIS_PERCENT: u8 = 2;
 
+/// Which devices are in alert, and which of those the user muted.
+///
+/// Muting lasts until the device has been charged back up (to the same exit
+/// level that ends an alert); the next drop below the threshold alerts again.
+/// It is kept in memory only, so every start of the program begins unmuted.
 #[derive(Default)]
 pub struct AlertState {
     alerting: BTreeSet<DeviceId>,
+    muted: BTreeSet<DeviceId>,
 }
 
 impl AlertState {
-    /// Update from a new snapshot; returns the devices currently in alert.
+    /// Update from a new snapshot; returns the devices whose alert should be shown
+    /// (in alert and not muted).
     pub fn update<'a>(&mut self, snap: &'a Snapshot, cfg: &Config) -> Vec<&'a DeviceState> {
+        let exit_level = cfg.threshold_percent.saturating_add(HYSTERESIS_PERCENT);
         let mut now = BTreeSet::new();
         for d in &snap.devices {
             let Some(b) = &d.battery else { continue };
+            // Charged back up: the mute has done its job. Charging alone is not
+            // enough; a short top-up that stays low keeps the alert muted.
+            if b.percent >= exit_level {
+                self.muted.remove(&d.id);
+            }
             let charging = b.charge.is_charging() || b.external_power;
             if cfg.suppress_while_charging && charging {
                 continue;
             }
             let was = self.alerting.contains(&d.id);
-            let exit_level = cfg.threshold_percent.saturating_add(HYSTERESIS_PERCENT);
             let alert = b.percent < cfg.threshold_percent || (was && b.percent < exit_level);
             if alert {
                 now.insert(d.id.clone());
             }
         }
         self.alerting = now;
-        snap.devices.iter().filter(|d| self.alerting.contains(&d.id)).collect()
+        snap.devices
+            .iter()
+            .filter(|d| self.alerting.contains(&d.id) && !self.muted.contains(&d.id))
+            .collect()
+    }
+
+    /// Any device is low, whether its alert is muted or not.
+    pub fn any_alerting(&self) -> bool {
+        !self.alerting.is_empty()
+    }
+
+    /// A muted device is still low.
+    pub fn is_muted(&self) -> bool {
+        self.alerting.iter().any(|id| self.muted.contains(id))
+    }
+
+    /// Silence every device currently in alert.
+    pub fn mute(&mut self) {
+        self.muted.extend(self.alerting.iter().cloned());
+    }
+
+    pub fn unmute(&mut self) {
+        self.muted.clear();
     }
 }
 
@@ -149,6 +183,52 @@ mod tests {
         assert!(alerting(&mut st, d(17), &cfg).is_empty());
         // And it does not re-enter at 16.
         assert!(alerting(&mut st, d(16), &cfg).is_empty());
+    }
+
+    #[test]
+    fn mute_lasts_until_charged_back_above_threshold() {
+        let cfg = Config { threshold_percent: 15, ..Config::default() };
+        let mut st = AlertState::default();
+        let d = |p, c| vec![device("m", p, c)];
+        let dis = ChargeState::Discharging;
+        assert_eq!(alerting(&mut st, d(10, dis), &cfg), ["m"]);
+        st.mute();
+        assert!(alerting(&mut st, d(9, dis), &cfg).is_empty(), "muted while still low");
+        assert!(st.is_muted() && st.any_alerting());
+        // Noise around the threshold and a short top-up do not end the mute.
+        assert!(alerting(&mut st, d(16, dis), &cfg).is_empty());
+        assert!(alerting(&mut st, d(12, ChargeState::Charging), &cfg).is_empty());
+        assert!(alerting(&mut st, d(12, dis), &cfg).is_empty());
+        // Charged back up to the exit level: mute is over, next drop alerts again.
+        assert!(alerting(&mut st, d(17, ChargeState::Charging), &cfg).is_empty());
+        assert!(alerting(&mut st, d(40, dis), &cfg).is_empty());
+        assert!(!st.is_muted());
+        assert_eq!(alerting(&mut st, d(14, dis), &cfg), ["m"]);
+    }
+
+    #[test]
+    fn mute_only_silences_devices_already_in_alert() {
+        let cfg = Config { threshold_percent: 15, ..Config::default() };
+        let mut st = AlertState::default();
+        let dis = ChargeState::Discharging;
+        alerting(&mut st, vec![device("a", 5, dis), device("b", 80, dis)], &cfg);
+        st.mute();
+        // "b" running low later is a new alert.
+        assert_eq!(alerting(&mut st, vec![device("a", 5, dis), device("b", 10, dis)], &cfg), ["b"]);
+    }
+
+    #[test]
+    fn unmute_shows_the_alert_again_and_fresh_state_is_unmuted() {
+        let cfg = Config::default();
+        let mut st = AlertState::default();
+        let low = || vec![device("m", 5, ChargeState::Discharging)];
+        alerting(&mut st, low(), &cfg);
+        st.mute();
+        assert!(alerting(&mut st, low(), &cfg).is_empty());
+        st.unmute();
+        assert_eq!(alerting(&mut st, low(), &cfg), ["m"]);
+        // A restart creates a new state: nothing is muted.
+        assert_eq!(alerting(&mut AlertState::default(), low(), &cfg), ["m"]);
     }
 
     #[test]

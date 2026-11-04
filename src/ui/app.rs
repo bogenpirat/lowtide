@@ -24,7 +24,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     RegisterDeviceNotificationW, RegisterWindowMessageW, SetForegroundWindow, SetTimer,
     TrackPopupMenuEx, TranslateMessage, UnregisterDeviceNotification, DBT_DEVICEARRIVAL,
     DBT_DEVICEREMOVECOMPLETE, DBT_DEVTYP_DEVICEINTERFACE, DEVICE_NOTIFY_WINDOW_HANDLE,
-    DEV_BROADCAST_DEVICEINTERFACE_W, HDEVNOTIFY, MF_SEPARATOR, MF_STRING, MSG,
+    DEV_BROADCAST_DEVICEINTERFACE_W, HDEVNOTIFY, MF_CHECKED, MF_GRAYED, MF_SEPARATOR, MF_STRING, MSG,
     TPM_BOTTOMALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_APP, WM_CONTEXTMENU, WM_DESTROY,
     WM_DEVICECHANGE, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_HOTKEY, WM_NULL, WM_SETTINGCHANGE,
     WM_TIMER, WNDCLASSW, WS_EX_TOOLWINDOW, WS_POPUP,
@@ -67,6 +67,7 @@ const MENU_STATUS: usize = 1;
 const MENU_REFRESH: usize = 2;
 const MENU_SETTINGS: usize = 3;
 const MENU_QUIT: usize = 4;
+const MENU_MUTE: usize = 5;
 
 pub struct Options {
     pub simulate: Option<u8>,
@@ -257,8 +258,27 @@ impl App {
         }
     }
 
+    /// Tray "mute": silence the current alert until the device is charged back up,
+    /// or bring a muted alert back. Not saved anywhere, so a restart starts unmuted.
+    fn toggle_mute(&mut self) {
+        if self.alert_state.is_muted() {
+            self.alert_state.unmute();
+        } else {
+            self.alert_state.mute();
+        }
+        self.update_alert();
+        self.update_tray();
+    }
+
+    /// Menu state of the mute entry: None when nothing is low (greyed out),
+    /// otherwise whether it is checked.
+    fn mute_menu_state(&self) -> Option<bool> {
+        self.alert_state.any_alerting().then(|| self.alert_state.is_muted())
+    }
+
     fn update_tray(&mut self) {
-        let alerting = self.alert.is_visible();
+        // Muting hides the overlay, not the fact that a battery is low.
+        let alerting = self.alert_state.any_alerting();
         let lowest = self
             .snapshot
             .devices
@@ -272,7 +292,14 @@ impl App {
             Some((_, b)) => IconState::Normal(b.percent),
         };
         let s = t();
-        let mut tip = String::from(if self.snapshot.devices.is_empty() { s.tray_no_devices } else { "Lowtide" });
+        let header = if self.snapshot.devices.is_empty() {
+            s.tray_no_devices
+        } else if self.alert_state.is_muted() {
+            s.tray_muted
+        } else {
+            "Lowtide"
+        };
+        let mut tip = String::from(header);
         for d in &self.snapshot.devices {
             tip.push('\n');
             match &d.battery {
@@ -399,12 +426,18 @@ impl Drop for App {
     }
 }
 
-fn show_tray_menu(hwnd: HWND, at: POINT) -> usize {
+fn show_tray_menu(hwnd: HWND, at: POINT, mute: Option<bool>) -> usize {
     unsafe {
         let Ok(menu) = CreatePopupMenu() else { return 0 };
         let s = t();
         let _ = AppendMenuW(menu, MF_STRING, MENU_STATUS, &HSTRING::from(s.menu_status));
         let _ = AppendMenuW(menu, MF_STRING, MENU_REFRESH, &HSTRING::from(s.menu_refresh));
+        let mute_flags = match mute {
+            None => MF_STRING | MF_GRAYED,
+            Some(true) => MF_STRING | MF_CHECKED,
+            Some(false) => MF_STRING,
+        };
+        let _ = AppendMenuW(menu, mute_flags, MENU_MUTE, &HSTRING::from(s.menu_mute));
         let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
         let _ = AppendMenuW(menu, MF_STRING, MENU_SETTINGS, &HSTRING::from(s.menu_settings));
         let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
@@ -432,6 +465,9 @@ fn run_menu_command(hwnd: HWND, cmd: usize) {
         }
         MENU_REFRESH => {
             with_app(|a| a.monitor.send(Command::RefreshNow));
+        }
+        MENU_MUTE => {
+            with_app(|a| a.toggle_mute());
         }
         MENU_SETTINGS => open_settings(hwnd),
         MENU_QUIT => unsafe {
@@ -472,7 +508,8 @@ extern "system" fn main_wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
             match event {
                 WM_CONTEXTMENU => {
                     // No app borrow is held while the menu's modal loop runs.
-                    let cmd = show_tray_menu(hwnd, at);
+                    let mute = with_app(|a| a.mute_menu_state()).flatten();
+                    let cmd = show_tray_menu(hwnd, at, mute);
                     run_menu_command(hwnd, cmd);
                 }
                 NIN_SELECT | NIN_KEYSELECT => {
