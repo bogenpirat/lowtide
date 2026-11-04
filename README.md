@@ -51,22 +51,36 @@ hides an active alert.
 - check interval
 - hotkey
 - **Start with Windows**
+- language
 - for each overlay: position (9 anchors), margin or offset, popup duration,
   font, text and background colour, opacity, padding and corner radius
 
 **Preview** shows both overlays with the unsaved settings.
 
+### Languages
+
+Lowtide speaks **English**, **German** (Deutsch) and **Swabian** (Schwäbisch).
+By default it follows the Windows display language (German or English).
+Swabian is opt-in, under *Settings… → Language*. The tray menu, tooltips,
+overlays, settings dialog, messages and command-line output all switch
+immediately when you click Apply.
+
+All text lives in `src/i18n.rs`, one complete table per language. A missing
+translation is a compile error, and a test checks that every language uses the
+same `{placeholders}`. To add a language, add a table and a `Language` variant.
+
 All percentages are 0–100. The settings live in
 `%APPDATA%\lowtide\config.toml`, which you can also edit by hand:
 
 ```toml
+language = "auto"   # auto, en, de, swabian
 threshold_percent = 15
 suppress_while_charging = true
 hotkey = "Ctrl+Alt+Shift+B"   # empty disables it; Win is allowed here
 poll_interval_s = 60
 
 [alert]
-message = "{device} battery low: {percent}%"   # also {status}
+message = ""   # empty = the language's default text; placeholders {device} {percent} {status}
 anchor = "bottom_right"   # top_left, top, top_right, left, center, right, bottom_left, bottom
 margin = 24
 
