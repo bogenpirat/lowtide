@@ -54,16 +54,14 @@ fn key_from_name(name: &str) -> Option<u16> {
     if b.len() == 1 && (b[0].is_ascii_uppercase() || b[0].is_ascii_digit()) {
         return Some(u16::from(b[0]));
     }
-    if let Some(n) = upper.strip_prefix('F').and_then(|n| n.parse::<u16>().ok()) {
-        if (1..=24).contains(&n) {
+    if let Some(n) = upper.strip_prefix('F').and_then(|n| n.parse::<u16>().ok())
+        && (1..=24).contains(&n) {
             return Some(0x70 + n - 1);
         }
-    }
-    if let Some(n) = upper.strip_prefix("NUM").and_then(|n| n.parse::<u16>().ok()) {
-        if n <= 9 {
+    if let Some(n) = upper.strip_prefix("NUM").and_then(|n| n.parse::<u16>().ok())
+        && n <= 9 {
             return Some(0x60 + n);
         }
-    }
     NAMED_KEYS.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|&(_, vk)| vk)
 }
 
@@ -133,7 +131,7 @@ impl Hotkey {
         })
     }
 
-    pub fn to_control(&self) -> u16 {
+    pub fn to_control(self) -> u16 {
         let flags = u16::from(self.shift) | u16::from(self.ctrl) << 1 | u16::from(self.alt) << 2;
         flags << 8 | (self.vk & 0xFF)
     }

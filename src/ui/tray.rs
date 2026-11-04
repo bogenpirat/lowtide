@@ -65,8 +65,8 @@ impl Tray {
         if !force && self.state == Some(state) && self.tip == tip {
             return;
         }
-        if force || self.state != Some(state) {
-            if let Ok(icon) = draw_icon(state, self.hwnd) {
+        if (force || self.state != Some(state))
+            && let Ok(icon) = draw_icon(state, self.hwnd) {
                 let old = std::mem::replace(&mut self.icon, icon);
                 if !old.is_invalid() {
                     unsafe {
@@ -74,7 +74,6 @@ impl Tray {
                     }
                 }
             }
-        }
         self.state = Some(state);
         self.tip = tip.to_string();
         let mut nid = self.data();
