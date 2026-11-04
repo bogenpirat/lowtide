@@ -64,7 +64,9 @@ once, as wired. The two paths are matched by the device's unit ID.
 ## 🚀 Usage
 
 1. Download `lowtide.exe` from the
-   [latest release](https://github.com/bogenpirat/lowtide/releases/latest).
+   [latest release](https://github.com/bogenpirat/lowtide/releases/latest),
+   or grab the [latest build](https://github.com/bogenpirat/lowtide/releases/tag/latest-build)
+   of `main` for the newest changes.
 2. Run it. Lowtide lives in the notification area.
 3. Optionally, enable **Start with Windows** under *Settings…*.
 
@@ -234,3 +236,9 @@ git push origin v0.1.0
 The [release workflow](.github/workflows/release.yml) runs the tests, builds
 `lowtide.exe` on Windows and publishes it as a GitHub release with a SHA-256
 checksum.
+
+Every push to `main` also rebuilds the
+[**Latest build**](https://github.com/bogenpirat/lowtide/releases/tag/latest-build)
+prerelease. Its `latest-build` tag is moved to the new commit, and its files
+are replaced. A direct link to the exe that never changes:
+<https://github.com/bogenpirat/lowtide/releases/download/latest-build/lowtide.exe>
