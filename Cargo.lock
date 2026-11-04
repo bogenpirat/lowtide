@@ -81,6 +81,7 @@ dependencies = [
  "serde_json",
  "toml",
  "windows",
+ "windows-numerics",
 ]
 
 [[package]]
