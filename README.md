@@ -221,3 +221,16 @@ manifest and dialog are embedded, so the exe depends only on DLLs that ship
 with Windows.
 
 `tools/make_icon.py` (Pillow) regenerates `res/lowtide.ico`.
+
+### Releasing
+
+Push a tag matching the version in `Cargo.toml`:
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The [release workflow](.github/workflows/release.yml) runs the tests, builds
+`lowtide.exe` on Windows and publishes it as a GitHub release with a SHA-256
+checksum.
