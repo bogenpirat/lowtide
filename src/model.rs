@@ -3,6 +3,8 @@
 
 use std::time::SystemTime;
 
+use crate::i18n::{fill, t};
+
 /// Stable identity of a physical device, unique across all sources.
 /// The same device reached through different paths (cable, receiver) must
 /// produce the same id so it can be de-duplicated.
@@ -24,13 +26,14 @@ pub enum ChargeState {
 
 impl ChargeState {
     pub fn label(self) -> &'static str {
+        let s = t();
         match self {
-            ChargeState::Discharging => "discharging",
-            ChargeState::Charging => "charging",
-            ChargeState::Full => "fully charged",
-            ChargeState::NotCharging => "not charging",
-            ChargeState::Error => "charging error",
-            ChargeState::Unknown => "unknown",
+            ChargeState::Discharging => s.charge_discharging,
+            ChargeState::Charging => s.charge_charging,
+            ChargeState::Full => s.charge_full,
+            ChargeState::NotCharging => s.charge_not_charging,
+            ChargeState::Error => s.charge_error,
+            ChargeState::Unknown => s.charge_unknown,
         }
     }
 
@@ -51,10 +54,8 @@ pub enum Connection {
 impl Connection {
     pub fn label(&self) -> String {
         match self {
-            Connection::Wired => "wired (USB cable)".into(),
-            Connection::Receiver { receiver_pid, slot } => {
-                format!("wireless (receiver {receiver_pid:04X}, slot {slot})")
-            }
+            Connection::Wired => t().connection_wired.into(),
+            Connection::Receiver { receiver_pid, slot } => fill!(t().connection_receiver, pid = format!("{receiver_pid:04X}"), slot = slot),
         }
     }
 }

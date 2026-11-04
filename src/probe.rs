@@ -6,6 +6,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 use windows::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
 
+use crate::config::Config;
+use crate::i18n::{self, fill, t};
 use crate::model::{DeviceState, Snapshot};
 use crate::monitor::Monitor;
 use crate::sources;
@@ -55,7 +57,7 @@ pub fn scan_once() -> Snapshot {
         s.rescan();
     }
     for s in &all {
-        eprintln!("source {}: {} device(s)", s.name(), s.devices().len());
+        eprintln!("{}", fill!(t().cli_source_count, source = s.name(), count = s.devices().len()));
     }
     let mut snap = Snapshot::from_devices(all.iter().flat_map(|s| s.devices()));
     // A sleeping wireless device may miss the first ping; the traffic wakes it.
@@ -69,44 +71,54 @@ pub fn scan_once() -> Snapshot {
     snap
 }
 
-fn attach_console() {
-    // GUI-subsystem binary: borrow the parent console so output is visible.
+/// Console output for a GUI-subsystem binary, in the configured language.
+fn cli_setup() {
+    // Borrow the parent console so output is visible.
     unsafe {
         let _ = AttachConsole(ATTACH_PARENT_PROCESS);
     }
+    let cfg = Config::path()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|text| Config::from_toml(&text).ok())
+        .unwrap_or_default();
+    i18n::set_language(cfg.language.resolve());
 }
 
 /// `lowtide --watch [seconds]`: run the real monitor and print one line per
 /// published change (events, polls). Useful to verify push notifications.
 pub fn watch(poll_secs: u64) -> i32 {
-    attach_console();
+    cli_setup();
     let started = std::time::Instant::now();
     let _monitor = Monitor::spawn(sources::all(), Duration::from_secs(poll_secs), move |snap| {
-        let t = started.elapsed().as_secs_f32();
+        let secs = started.elapsed().as_secs_f32();
+        let s = t();
         if snap.devices.is_empty() {
-            println!("[{t:8.1}s] no devices");
+            println!("[{secs:8.1}s] {}", s.cli_no_devices);
         }
         for d in &snap.devices {
-            let battery = d.battery.as_ref().map_or("no battery info".to_string(), |b| {
-                format!("{}%{} {}", b.percent, if b.estimated { " (est.)" } else { "" }, b.charge.label())
+            let mut battery = d.battery.as_ref().map_or(s.info_no_battery.to_string(), |b| {
+                format!("{}%{} {}", b.percent, if b.estimated { s.cli_estimated } else { "" }, b.charge.label())
             });
-            let stale = if d.stale { " [stale]" } else { "" };
-            println!("[{t:8.1}s] {} via {}: {battery}{stale}", d.name, d.connection.label());
+            if d.stale {
+                battery.push_str(s.cli_stale);
+            }
+            let line = fill!(s.cli_device_line, device = d.name, connection = d.connection.label(), battery = battery);
+            println!("[{secs:8.1}s] {line}");
         }
     });
-    eprintln!("watching (poll every {poll_secs} s), Ctrl+C to stop");
+    eprintln!("{}", fill!(t().cli_watching, s = poll_secs));
     loop {
         std::thread::park();
     }
 }
 
 pub fn run() -> i32 {
-    attach_console();
+    cli_setup();
     let started = SystemTime::now();
     let snap = scan_once();
     let report: Vec<DeviceReport> = snap.devices.iter().map(DeviceReport::from).collect();
     println!("{}", serde_json::to_string_pretty(&report).unwrap_or_default());
     let ms = started.elapsed().map(|d| d.as_millis()).unwrap_or(0);
-    eprintln!("{} device(s), scan took {ms} ms", report.len());
+    eprintln!("{}", fill!(t().cli_scan_summary, count = report.len(), ms = ms));
     if report.is_empty() { 1 } else { 0 }
 }

@@ -36,7 +36,7 @@ impl BatterySource for Simulated {
     fn devices(&self) -> Vec<DeviceState> {
         vec![DeviceState {
             id: DeviceId { source: "simulated", key: "1".into() },
-            name: "Simulated mouse".into(),
+            name: crate::i18n::t().simulated_device.into(),
             kind: Some("mouse".into()),
             connection: Connection::Receiver { receiver_pid: 0, slot: 1 },
             battery: Some(BatteryInfo::new(self.percent, ChargeState::Discharging)),

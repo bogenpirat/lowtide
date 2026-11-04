@@ -98,7 +98,7 @@ pub fn probe(link: &mut Link, index: u8, protocol: (u8, u8)) -> Result<DeviceInf
     }
 
     if info.name.is_empty() {
-        info.name = "Logitech device".into();
+        info.name = crate::i18n::t().generic_logitech_device.into();
     }
     Ok(info)
 }

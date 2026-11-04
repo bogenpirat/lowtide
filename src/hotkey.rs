@@ -1,6 +1,7 @@
 //! Hotkey strings like `Ctrl+Alt+Shift+B` <-> modifier flags and virtual key,
 //! plus conversion to and from the native hotkey control's encoding.
 
+use crate::i18n::{fill, t};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     HOT_KEY_MODIFIERS, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, MOD_WIN,
 };
@@ -88,15 +89,15 @@ impl Hotkey {
                 "alt" => hk.alt = true,
                 "shift" => hk.shift = true,
                 "win" | "super" => hk.win = true,
-                _ if hk.vk != 0 => return Err(format!("more than one key in \"{s}\"")),
-                _ => hk.vk = key_from_name(part).ok_or_else(|| format!("unknown key \"{part}\""))?,
+                _ if hk.vk != 0 => return Err(fill!(t().hotkey_two_keys, hotkey = s)),
+                _ => hk.vk = key_from_name(part).ok_or_else(|| fill!(t().hotkey_unknown_key, key = part))?,
             }
         }
         if hk.vk == 0 {
-            return Err(format!("no key in \"{s}\""));
+            return Err(fill!(t().hotkey_no_key, hotkey = s));
         }
         if !(hk.ctrl || hk.alt || hk.win) {
-            return Err("a hotkey needs Ctrl, Alt or Win".into());
+            return Err(t().hotkey_needs_modifier.into());
         }
         Ok(Some(hk))
     }

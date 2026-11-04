@@ -4,6 +4,7 @@ mod alert;
 mod autostart;
 mod config;
 mod hotkey;
+mod i18n;
 mod model;
 mod monitor;
 mod probe;
@@ -46,7 +47,7 @@ fn main() {
     }
 
     if let Err(e) = ui::app::run(ui::app::Options { simulate, open_settings }) {
-        let text: Vec<u16> = format!("Lowtide could not start:\n{e}").encode_utf16().chain(Some(0)).collect();
+        let text: Vec<u16> = i18n::fill!(i18n::t().start_failed, error = e).encode_utf16().chain(Some(0)).collect();
         unsafe {
             MessageBoxW(None, windows::core::PCWSTR(text.as_ptr()), w!("Lowtide"), MB_ICONERROR);
         }

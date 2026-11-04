@@ -6,6 +6,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::i18n::{t, Language, LanguageSetting};
+
 pub const APP_DIR: &str = "lowtide";
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -36,16 +38,17 @@ impl Anchor {
     ];
 
     pub fn label(self) -> &'static str {
+        let s = t();
         match self {
-            Anchor::TopLeft => "Top left",
-            Anchor::Top => "Top",
-            Anchor::TopRight => "Top right",
-            Anchor::Left => "Left",
-            Anchor::Center => "Center",
-            Anchor::Right => "Right",
-            Anchor::BottomLeft => "Bottom left",
-            Anchor::Bottom => "Bottom",
-            Anchor::BottomRight => "Bottom right",
+            Anchor::TopLeft => s.anchor_top_left,
+            Anchor::Top => s.anchor_top,
+            Anchor::TopRight => s.anchor_top_right,
+            Anchor::Left => s.anchor_left,
+            Anchor::Center => s.anchor_center,
+            Anchor::Right => s.anchor_right,
+            Anchor::BottomLeft => s.anchor_bottom_left,
+            Anchor::Bottom => s.anchor_bottom,
+            Anchor::BottomRight => s.anchor_bottom_right,
         }
     }
 }
@@ -115,6 +118,7 @@ impl TextStyle {
 #[serde(default)]
 pub struct AlertConfig {
     /// Placeholders: `{device}`, `{percent}`, `{status}`. One line per low device.
+    /// Empty means the default message of the current language.
     pub message: String,
     pub anchor: Anchor,
     /// Distance from the work-area edge, in DIPs.
@@ -122,10 +126,17 @@ pub struct AlertConfig {
     pub style: TextStyle,
 }
 
+impl AlertConfig {
+    /// The template to use: the custom message, or the language's default.
+    pub fn effective_message(&self) -> &str {
+        if self.message.trim().is_empty() { t().alert_default_message } else { &self.message }
+    }
+}
+
 impl Default for AlertConfig {
     fn default() -> Self {
         AlertConfig {
-            message: "{device} battery low: {percent}%".into(),
+            message: String::new(),
             anchor: Anchor::BottomRight,
             margin: 24,
             style: TextStyle::default(),
@@ -166,6 +177,7 @@ impl Default for InfoConfig {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct Config {
+    pub language: LanguageSetting,
     /// Show the alert below this charge (0-100 %).
     pub threshold_percent: u8,
     pub suppress_while_charging: bool,
@@ -179,6 +191,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Config {
+            language: LanguageSetting::Auto,
             threshold_percent: 15,
             suppress_while_charging: true,
             hotkey: "Ctrl+Alt+Shift+B".into(),
@@ -200,6 +213,12 @@ impl Config {
         self.info.duration_ms = self.info.duration_ms.clamp(100, 60_000);
         self.alert.style.sanitize(&defaults.alert.style);
         self.info.style.sanitize(&defaults.info.style);
+        // A default message saved in any language means "default", so it
+        // follows a later language change instead of sticking in one language.
+        let msg = self.alert.message.trim();
+        if Language::ALL.iter().any(|l| l.strings().alert_default_message == msg) {
+            self.alert.message.clear();
+        }
         self
     }
 
@@ -304,6 +323,24 @@ mod tests {
         let cfg = Config::from_toml("[alert.style]\ntext_color = \"red\"\nbackground = \"#12345\"\n").unwrap();
         assert_eq!(cfg.alert.style.text_color, "#FFFFFF");
         assert_eq!(cfg.alert.style.background, "#B00020");
+    }
+
+    #[test]
+    fn saved_default_message_follows_the_language() {
+        let cfg = Config::from_toml("[alert]
+message = \"{device} battery low: {percent}%\"
+").unwrap();
+        assert_eq!(cfg.alert.message, "");
+        let custom = Config::from_toml("[alert]
+message = \"Charge {device}!\"
+").unwrap();
+        assert_eq!(custom.alert.effective_message(), "Charge {device}!");
+    }
+
+    #[test]
+    fn language_defaults_to_auto() {
+        assert_eq!(Config::from_toml("").unwrap().language, LanguageSetting::Auto);
+        assert_eq!(Config::from_toml("language = \"swabian\"").unwrap().language, LanguageSetting::Swabian);
     }
 
     #[test]

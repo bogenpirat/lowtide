@@ -10,7 +10,7 @@ use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
-use windows::core::{w, Result, PCWSTR};
+use windows::core::{w, Result, HSTRING, PCWSTR};
 use windows::Win32::Devices::HumanInterfaceDevice::HidD_GetHidGuid;
 use windows::Win32::Foundation::{HANDLE, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::Graphics::Direct2D::{D2D1CreateFactory, ID2D1Factory, D2D1_FACTORY_TYPE_SINGLE_THREADED};
@@ -41,6 +41,7 @@ use crate::alert::{alert_text, info_text, AlertState};
 use crate::autostart;
 use crate::config::Config;
 use crate::hotkey::Hotkey;
+use crate::i18n::{self, fill, t};
 use crate::model::{BatteryInfo, ChargeState, Connection, DeviceId, DeviceState, Snapshot};
 use crate::monitor::{Command, Monitor};
 use crate::sources::{self, BatterySource};
@@ -146,6 +147,7 @@ pub fn run(opts: Options) -> Result<()> {
         let d2d: ID2D1Factory = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
         let dwrite: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
         let (config, config_error) = Config::load();
+        i18n::set_language(config.language.resolve());
 
         let shared = Arc::new(Mutex::new(Snapshot::default()));
         let sources: Vec<Box<dyn BatterySource>> = match opts.simulate {
@@ -160,7 +162,7 @@ pub fn run(opts: Options) -> Result<()> {
         });
 
         let mut tray = Tray::new(hwnd, WM_APP_TRAY);
-        tray.set(IconState::Unknown, "Lowtide: looking for devices…", true);
+        tray.set(IconState::Unknown, t().tray_scanning, true);
 
         let mut app = App {
             hwnd,
@@ -177,10 +179,10 @@ pub fn run(opts: Options) -> Result<()> {
             devnotify: register_hid_arrival(hwnd),
         };
         if let Some(e) = config_error {
-            app.tray.notify("Lowtide: config file has errors, using defaults", &e);
+            app.tray.notify(t().notify_config_error, &e);
         }
         if let Err(e) = app.register_hotkey() {
-            app.tray.notify("Lowtide: hotkey unavailable", &e);
+            app.tray.notify(t().notify_hotkey_unavailable, &e);
         }
         APP.with(|cell| *cell.borrow_mut() = Some(app));
         if opts.open_settings {
@@ -224,7 +226,7 @@ impl App {
             }
             let Some(hk) = Hotkey::parse(&self.config.hotkey)? else { return Ok(()) };
             RegisterHotKey(Some(self.hwnd), HOTKEY_ID, hk.modifiers(), u32::from(hk.vk))
-                .map_err(|_| format!("{hk} is already used by another program"))?;
+                .map_err(|_| fill!(t().hotkey_in_use, hotkey = hk))?;
             self.hotkey_registered = true;
         }
         Ok(())
@@ -244,7 +246,7 @@ impl App {
         if low.is_empty() {
             self.alert.hide();
         } else {
-            let text = alert_text(&self.config.alert.message, &low);
+            let text = alert_text(self.config.alert.effective_message(), &low);
             let a = &self.config.alert;
             let placement = Placement { anchor: a.anchor, margin: a.margin, offset: [0, 0] };
             let _ = self.alert.show(&text, &a.style, &placement);
@@ -269,19 +271,16 @@ impl App {
             Some((_, b)) if b.charge.is_charging() => IconState::Charging(b.percent),
             Some((_, b)) => IconState::Normal(b.percent),
         };
-        let mut tip = String::from("Lowtide");
-        if self.snapshot.devices.is_empty() {
-            tip.push_str(": no devices found");
-        }
+        let s = t();
+        let mut tip = String::from(if self.snapshot.devices.is_empty() { s.tray_no_devices } else { "Lowtide" });
         for d in &self.snapshot.devices {
             tip.push('\n');
-            tip.push_str(&d.name);
             match &d.battery {
-                Some(b) => tip.push_str(&format!(": {}% ({})", b.percent, b.charge.label())),
-                None => tip.push_str(": no battery info"),
+                Some(b) => tip.push_str(&fill!(s.tray_device, device = d.name, percent = b.percent, status = b.charge.label())),
+                None => tip.push_str(&format!("{}: {}", d.name, s.info_no_battery)),
             }
             if d.stale {
-                tip.push_str(", not responding");
+                tip.push_str(s.tray_not_responding);
             }
         }
         self.tray.set(state, &tip, false);
@@ -308,7 +307,7 @@ impl App {
     fn preview(&mut self, cfg: &Config) {
         let sample = DeviceState {
             id: DeviceId { source: "preview", key: "1".into() },
-            name: "Sample mouse".into(),
+            name: t().sample_device.into(),
             kind: Some("mouse".into()),
             connection: Connection::Receiver { receiver_pid: 0xC539, slot: 1 },
             battery: Some(BatteryInfo::new(cfg.threshold_percent.saturating_sub(1), ChargeState::Discharging)),
@@ -318,7 +317,7 @@ impl App {
         };
         let a = &cfg.alert;
         let placement = Placement { anchor: a.anchor, margin: a.margin, offset: [0, 0] };
-        let _ = self.alert.show(&alert_text(&a.message, &[&sample]), &a.style, &placement);
+        let _ = self.alert.show(&alert_text(a.effective_message(), &[&sample]), &a.style, &placement);
 
         let snap = if self.snapshot.devices.is_empty() {
             Snapshot { devices: vec![sample] }
@@ -342,15 +341,18 @@ impl App {
     /// Activate and save new settings. On a hotkey conflict nothing changes.
     fn apply_config(&mut self, new: Config, start_with_windows: bool) -> std::result::Result<(), String> {
         let old = std::mem::replace(&mut self.config, new);
+        i18n::set_language(self.config.language.resolve());
         if let Err(e) = self.register_hotkey() {
             self.config = old;
+            i18n::set_language(self.config.language.resolve());
             let _ = self.register_hotkey();
             return Err(e);
         }
         if start_with_windows != autostart::is_enabled() {
-            autostart::set(start_with_windows).map_err(|e| format!("Could not change autostart: {}", e.message()))?;
+            autostart::set(start_with_windows)
+                .map_err(|e| fill!(t().autostart_failed, error = e.message()))?;
         }
-        self.config.save().map_err(|e| format!("Could not save the settings: {e}"))?;
+        self.config.save().map_err(|e| fill!(t().save_failed, error = e))?;
         if old.poll_interval_s != self.config.poll_interval_s {
             self.monitor
                 .send(Command::SetPollInterval(Duration::from_secs(self.config.poll_interval_s.into())));
@@ -400,12 +402,13 @@ impl Drop for App {
 fn show_tray_menu(hwnd: HWND, at: POINT) -> usize {
     unsafe {
         let Ok(menu) = CreatePopupMenu() else { return 0 };
-        let _ = AppendMenuW(menu, MF_STRING, MENU_STATUS, w!("Show battery status"));
-        let _ = AppendMenuW(menu, MF_STRING, MENU_REFRESH, w!("Refresh now"));
+        let s = t();
+        let _ = AppendMenuW(menu, MF_STRING, MENU_STATUS, &HSTRING::from(s.menu_status));
+        let _ = AppendMenuW(menu, MF_STRING, MENU_REFRESH, &HSTRING::from(s.menu_refresh));
         let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
-        let _ = AppendMenuW(menu, MF_STRING, MENU_SETTINGS, w!("Settings…"));
+        let _ = AppendMenuW(menu, MF_STRING, MENU_SETTINGS, &HSTRING::from(s.menu_settings));
         let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
-        let _ = AppendMenuW(menu, MF_STRING, MENU_QUIT, w!("Quit Lowtide"));
+        let _ = AppendMenuW(menu, MF_STRING, MENU_QUIT, &HSTRING::from(s.menu_quit));
         // Required so the menu closes when the user clicks elsewhere.
         let _ = SetForegroundWindow(hwnd);
         let cmd = TrackPopupMenuEx(
@@ -449,7 +452,7 @@ fn open_settings(hwnd: HWND) {
         with_app(|a| a.end_preview());
     };
     let apply = |c: &Config, autostart: bool| {
-        with_app(|a| a.apply_config(c.clone(), autostart)).unwrap_or_else(|| Err("Lowtide is busy, try again.".into()))
+        with_app(|a| a.apply_config(c.clone(), autostart)).unwrap_or_else(|| Err(t().app_busy.into()))
     };
     settings::show(hwnd, cfg, settings::Hooks { preview: &preview, end_preview: &end_preview, apply: &apply });
 }

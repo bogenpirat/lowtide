@@ -5,6 +5,7 @@ use std::collections::BTreeSet;
 use std::time::SystemTime;
 
 use crate::config::Config;
+use crate::i18n::{fill, t};
 use crate::model::{DeviceId, DeviceState, Snapshot};
 
 /// A device enters alert below the threshold and leaves only once it is this
@@ -56,7 +57,7 @@ pub fn alert_text(template: &str, devices: &[&DeviceState]) -> String {
 /// Info popup text: everything worth knowing about every device.
 pub fn info_text(snap: &Snapshot, now: SystemTime) -> String {
     if snap.devices.is_empty() {
-        return "No battery-powered devices found".into();
+        return t().info_no_devices.into();
     }
     let blocks: Vec<String> = snap
         .devices
@@ -69,7 +70,7 @@ pub fn info_text(snap: &Snapshot, now: SystemTime) -> String {
                     lines.push(format!("{}  {approx}{}%", d.name, b.percent));
                     let mut status = b.charge.label().to_string();
                     if b.external_power && !b.charge.is_charging() {
-                        status.push_str(", on external power");
+                        status.push_str(t().info_external_power);
                     }
                     lines.push(format!("{status} · {}", d.connection.label()));
                     if let Some(mv) = b.millivolts {
@@ -78,18 +79,18 @@ pub fn info_text(snap: &Snapshot, now: SystemTime) -> String {
                 }
                 None => {
                     lines.push(d.name.clone());
-                    lines.push(format!("no battery information · {}", d.connection.label()));
+                    lines.push(format!("{} · {}", t().info_no_battery, d.connection.label()));
                 }
             }
             if d.stale {
                 let ago = d.last_update.and_then(|t| now.duration_since(t).ok());
                 lines.push(match ago {
-                    Some(a) => format!("not responding, last read {} ago", human_duration(a.as_secs())),
-                    None => "not responding".into(),
+                    Some(a) => fill!(t().info_not_responding_since, ago = human_duration(a.as_secs())),
+                    None => t().info_not_responding.into(),
                 });
             }
             if let Some((_, fw)) = d.details.iter().find(|(k, _)| k == "Firmware") {
-                lines.push(format!("Firmware {fw}"));
+                lines.push(fill!(t().info_firmware, version = fw));
             }
             lines.join("\n")
         })
@@ -98,10 +99,11 @@ pub fn info_text(snap: &Snapshot, now: SystemTime) -> String {
 }
 
 fn human_duration(secs: u64) -> String {
+    let s = t();
     match secs {
-        0..=59 => format!("{secs} s"),
-        60..=3599 => format!("{} min", secs / 60),
-        _ => format!("{} h {} min", secs / 3600, secs % 3600 / 60),
+        0..=59 => fill!(s.duration_seconds, s = secs),
+        60..=3599 => fill!(s.duration_minutes, m = (secs / 60)),
+        _ => fill!(s.duration_hours, h = (secs / 3600), m = (secs % 3600 / 60)),
     }
 }
 
