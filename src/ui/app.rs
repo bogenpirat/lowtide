@@ -24,18 +24,24 @@ use windows::Win32::UI::WindowsAndMessaging::{
     RegisterDeviceNotificationW, RegisterWindowMessageW, SetForegroundWindow, SetTimer,
     TrackPopupMenuEx, TranslateMessage, UnregisterDeviceNotification, DBT_DEVICEARRIVAL,
     DBT_DEVICEREMOVECOMPLETE, DBT_DEVTYP_DEVICEINTERFACE, DEVICE_NOTIFY_WINDOW_HANDLE,
-    DEV_BROADCAST_DEVICEINTERFACE_W, HDEVNOTIFY, MF_GRAYED, MF_SEPARATOR, MF_STRING, MSG,
+    DEV_BROADCAST_DEVICEINTERFACE_W, HDEVNOTIFY, MF_SEPARATOR, MF_STRING, MSG,
     TPM_BOTTOMALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_APP, WM_CONTEXTMENU, WM_DESTROY,
     WM_DEVICECHANGE, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_HOTKEY, WM_NULL, WM_SETTINGCHANGE,
     WM_TIMER, WNDCLASSW, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 
+use windows::Win32::UI::Controls::{
+    InitCommonControlsEx, ICC_HOTKEY_CLASS, ICC_STANDARD_CLASSES, ICC_UPDOWN_CLASS, INITCOMMONCONTROLSEX,
+};
+
 use super::overlay::{self, Overlay, Placement};
+use super::settings;
 use super::tray::{IconState, Tray};
 use crate::alert::{alert_text, info_text, AlertState};
+use crate::autostart;
 use crate::config::Config;
 use crate::hotkey::Hotkey;
-use crate::model::Snapshot;
+use crate::model::{BatteryInfo, ChargeState, Connection, DeviceId, DeviceState, Snapshot};
 use crate::monitor::{Command, Monitor};
 use crate::sources::{self, BatterySource};
 
@@ -45,6 +51,8 @@ const WM_APP_SNAPSHOT: u32 = WM_APP + 1;
 const WM_APP_TRAY: u32 = WM_APP + 2;
 /// Sent by a second instance: show the status popup instead of starting again.
 pub const WM_APP_SHOW_INFO: u32 = WM_APP + 3;
+/// Sent by `lowtide --settings` (or posted to ourselves at startup): open the settings dialog.
+pub const WM_APP_OPEN_SETTINGS: u32 = WM_APP + 4;
 
 /// Keyboard activation of the tray icon (not exported by the windows crate).
 const NIN_KEYSELECT: u32 = NIN_SELECT | NINF_KEY;
@@ -61,6 +69,7 @@ const MENU_QUIT: usize = 4;
 
 pub struct Options {
     pub simulate: Option<u8>,
+    pub open_settings: bool,
 }
 
 struct App {
@@ -102,6 +111,11 @@ impl PostTarget {
 
 pub fn run(opts: Options) -> Result<()> {
     unsafe {
+        let icc = INITCOMMONCONTROLSEX {
+            dwSize: size_of::<INITCOMMONCONTROLSEX>() as u32,
+            dwICC: ICC_STANDARD_CLASSES | ICC_HOTKEY_CLASS | ICC_UPDOWN_CLASS,
+        };
+        let _ = InitCommonControlsEx(&icc);
         let instance = GetModuleHandleW(None)?;
         let wc = WNDCLASSW {
             lpfnWndProc: Some(main_wndproc),
@@ -169,6 +183,9 @@ pub fn run(opts: Options) -> Result<()> {
             app.tray.notify("Lowtide: hotkey unavailable", &e);
         }
         APP.with(|cell| *cell.borrow_mut() = Some(app));
+        if opts.open_settings {
+            let _ = PostMessageW(Some(hwnd), WM_APP_OPEN_SETTINGS, WPARAM(0), LPARAM(0));
+        }
 
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).into() {
@@ -287,6 +304,65 @@ impl App {
         self.monitor.send(Command::RefreshNow);
     }
 
+    /// Settings dialog "Preview": both overlays with unsaved settings and sample data.
+    fn preview(&mut self, cfg: &Config) {
+        let sample = DeviceState {
+            id: DeviceId { source: "preview", key: "1".into() },
+            name: "Sample mouse".into(),
+            kind: Some("mouse".into()),
+            connection: Connection::Receiver { receiver_pid: 0xC539, slot: 1 },
+            battery: Some(BatteryInfo::new(cfg.threshold_percent.saturating_sub(1), ChargeState::Discharging)),
+            last_update: Some(SystemTime::now()),
+            stale: false,
+            details: vec![],
+        };
+        let a = &cfg.alert;
+        let placement = Placement { anchor: a.anchor, margin: a.margin, offset: [0, 0] };
+        let _ = self.alert.show(&alert_text(&a.message, &[&sample]), &a.style, &placement);
+
+        let snap = if self.snapshot.devices.is_empty() {
+            Snapshot { devices: vec![sample] }
+        } else {
+            self.snapshot.clone()
+        };
+        let i = &cfg.info;
+        let placement = Placement { anchor: i.anchor, margin: i.margin, offset: i.offset };
+        let _ = self.info.show(&info_text(&snap, SystemTime::now()), &i.style, &placement);
+        unsafe {
+            SetTimer(Some(self.hwnd), TIMER_INFO, i.duration_ms, None);
+        }
+    }
+
+    /// Back from a preview to what the real battery state says.
+    fn end_preview(&mut self) {
+        self.alert.hide();
+        self.update_alert();
+    }
+
+    /// Activate and save new settings. On a hotkey conflict nothing changes.
+    fn apply_config(&mut self, new: Config, start_with_windows: bool) -> std::result::Result<(), String> {
+        let old = std::mem::replace(&mut self.config, new);
+        if let Err(e) = self.register_hotkey() {
+            self.config = old;
+            let _ = self.register_hotkey();
+            return Err(e);
+        }
+        if start_with_windows != autostart::is_enabled() {
+            autostart::set(start_with_windows).map_err(|e| format!("Could not change autostart: {}", e.message()))?;
+        }
+        self.config.save().map_err(|e| format!("Could not save the settings: {e}"))?;
+        if old.poll_interval_s != self.config.poll_interval_s {
+            self.monitor
+                .send(Command::SetPollInterval(Duration::from_secs(self.config.poll_interval_s.into())));
+        }
+        self.update_alert();
+        self.update_tray();
+        if self.info.is_visible() {
+            self.render_info();
+        }
+        Ok(())
+    }
+
     fn relayout(&mut self) {
         self.alert.relayout();
         self.info.relayout();
@@ -327,7 +403,7 @@ fn show_tray_menu(hwnd: HWND, at: POINT) -> usize {
         let _ = AppendMenuW(menu, MF_STRING, MENU_STATUS, w!("Show battery status"));
         let _ = AppendMenuW(menu, MF_STRING, MENU_REFRESH, w!("Refresh now"));
         let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
-        let _ = AppendMenuW(menu, MF_STRING | MF_GRAYED, MENU_SETTINGS, w!("Settings…"));
+        let _ = AppendMenuW(menu, MF_STRING, MENU_SETTINGS, w!("Settings…"));
         let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
         let _ = AppendMenuW(menu, MF_STRING, MENU_QUIT, w!("Quit Lowtide"));
         // Required so the menu closes when the user clicks elsewhere.
@@ -354,6 +430,7 @@ fn run_menu_command(hwnd: HWND, cmd: usize) {
         MENU_REFRESH => {
             with_app(|a| a.monitor.send(Command::RefreshNow));
         }
+        MENU_SETTINGS => open_settings(hwnd),
         MENU_QUIT => unsafe {
             let _ = DestroyWindow(hwnd);
         },
@@ -361,10 +438,30 @@ fn run_menu_command(hwnd: HWND, cmd: usize) {
     }
 }
 
+/// The dialog runs its own modal loop, so no app borrow may be held across it;
+/// each hook borrows the app only for its own duration.
+fn open_settings(hwnd: HWND) {
+    let Some(cfg) = with_app(|a| a.config.clone()) else { return };
+    let preview = |c: &Config| {
+        with_app(|a| a.preview(c));
+    };
+    let end_preview = || {
+        with_app(|a| a.end_preview());
+    };
+    let apply = |c: &Config, autostart: bool| {
+        with_app(|a| a.apply_config(c.clone(), autostart)).unwrap_or_else(|| Err("Lowtide is busy, try again.".into()))
+    };
+    settings::show(hwnd, cfg, settings::Hooks { preview: &preview, end_preview: &end_preview, apply: &apply });
+}
+
 extern "system" fn main_wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     let handled = match msg {
         WM_APP_SNAPSHOT => with_app(|a| a.on_snapshot()).is_some(),
         WM_APP_SHOW_INFO | WM_HOTKEY => with_app(|a| a.show_info()).is_some(),
+        WM_APP_OPEN_SETTINGS => {
+            open_settings(hwnd);
+            true
+        }
         WM_APP_TRAY => {
             // NOTIFYICON_VERSION_4: event in LOWORD(lparam), anchor point in wparam.
             let event = (lparam.0 & 0xFFFF) as u32;
