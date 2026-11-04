@@ -54,6 +54,9 @@ pub fn scan_once() -> Snapshot {
     for s in &mut all {
         s.rescan();
     }
+    for s in &all {
+        eprintln!("source {}: {} device(s)", s.name(), s.devices().len());
+    }
     let mut snap = Snapshot::from_devices(all.iter().flat_map(|s| s.devices()));
     // A sleeping wireless device may miss the first ping; the traffic wakes it.
     if snap.devices.is_empty() || snap.devices.iter().any(|d| d.stale) {
