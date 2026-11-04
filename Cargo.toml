@@ -3,7 +3,6 @@ name = "lowtide"
 version = "0.1.0"
 edition = "2024"
 description = "Click-through low-battery overlay for wireless peripherals"
-license = "MIT"
 build = "build.rs"
 
 [dependencies]
