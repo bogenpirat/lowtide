@@ -4,7 +4,7 @@
 
 use std::cell::Cell;
 
-use windows::core::{w, PCWSTR};
+use windows::core::{HSTRING, PCWSTR};
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     CreateSolidBrush, DeleteObject, DrawFocusRect, FillRect, FrameRect, GetSysColorBrush,
@@ -25,13 +25,14 @@ use windows::Win32::UI::WindowsAndMessaging::{
     DialogBoxParamW, EndDialog, GetDlgItem, GetDlgItemInt, GetDlgItemTextW,
     GetWindowLongPtrW, LoadIconW, MessageBoxW, SendDlgItemMessageW,
     SendMessageW, SetDlgItemInt, SetDlgItemTextW, SetForegroundWindow, SetWindowLongPtrW,
-    CB_ADDSTRING, CB_GETCURSEL, CB_SETCURSEL, ICON_BIG, ICON_SMALL, IDCANCEL, IDOK, MB_ICONWARNING,
+    SetWindowTextW, CB_ADDSTRING, CB_GETCURSEL, CB_RESETCONTENT, CB_SETCURSEL, ICON_BIG, ICON_SMALL, IDCANCEL, IDOK, MB_ICONWARNING,
     WINDOW_LONG_PTR_INDEX, WM_COMMAND, WM_DESTROY, WM_DRAWITEM, WM_INITDIALOG, WM_SETICON,
 };
 
 use crate::autostart;
 use crate::config::{format_color, parse_color, Anchor, Config, TextStyle};
 use crate::hotkey::Hotkey;
+use crate::i18n::{fill, t, LanguageSetting};
 
 /// Control ids, mirrored from res/resource.h.
 mod ids {
@@ -44,6 +45,7 @@ mod ids {
     pub const POLL_SPIN: i32 = 1005;
     pub const HOTKEY: i32 = 1006;
     pub const AUTOSTART: i32 = 1007;
+    pub const LANGUAGE: i32 = 1008;
     pub const ALERT_MSG: i32 = 1010;
     pub const ALERT_ANCHOR: i32 = 1011;
     pub const ALERT_MARGIN: i32 = 1012;
@@ -61,6 +63,22 @@ mod ids {
     pub const INFO_STYLE: i32 = 1200;
     pub const PREVIEW: i32 = 1300;
     pub const APPLY: i32 = 1301;
+    pub const L_GENERAL: i32 = 1401;
+    pub const L_THRESHOLD: i32 = 1402;
+    pub const L_POLL: i32 = 1403;
+    pub const L_SECONDS: i32 = 1404;
+    pub const L_HOTKEY: i32 = 1405;
+    pub const L_LANGUAGE: i32 = 1406;
+    pub const L_ALERT_GROUP: i32 = 1407;
+    pub const L_MESSAGE: i32 = 1408;
+    pub const L_PLACEHOLDERS: i32 = 1409;
+    pub const L_ALERT_POSITION: i32 = 1410;
+    pub const L_ALERT_MARGIN: i32 = 1411;
+    pub const L_INFO_GROUP: i32 = 1420;
+    pub const L_INFO_POSITION: i32 = 1421;
+    pub const L_INFO_MARGIN: i32 = 1422;
+    pub const L_OFFSET_X: i32 = 1423;
+    pub const L_SHOW_FOR: i32 = 1424;
 }
 
 // Offsets within a text-style block.
@@ -76,6 +94,12 @@ const STYLE_PADDING: i32 = 8;
 const STYLE_PADDING_SPIN: i32 = 9;
 const STYLE_RADIUS: i32 = 10;
 const STYLE_RADIUS_SPIN: i32 = 11;
+const STYLE_L_TEXT_COLOR: i32 = 12;
+const STYLE_L_TEXT_OPACITY: i32 = 13;
+const STYLE_L_PADDING: i32 = 14;
+const STYLE_L_BACKGROUND: i32 = 15;
+const STYLE_L_BG_OPACITY: i32 = 16;
+const STYLE_L_RADIUS: i32 = 17;
 
 pub struct Hooks<'a> {
     /// Show both overlays with these (unsaved) settings.
@@ -127,7 +151,7 @@ pub fn show(owner: HWND, cfg: Config, hooks: Hooks<'_>) {
         );
         if r == -1 {
             let e = windows::core::Error::from_thread();
-            warn(owner, &format!("Could not open the settings dialog: {}", e.message()));
+            warn(owner, &fill!(t().dlg_open_failed, error = e.message()));
         }
     }
     if state.previewed {
@@ -217,7 +241,12 @@ fn apply(hwnd: HWND, state: &mut State) -> bool {
     let Some((cfg, autostart)) = read_controls(hwnd, state) else { return false };
     match (state.hooks.apply)(&cfg, autostart) {
         Ok(()) => {
+            let language_changed = cfg.language != state.cfg.language;
             state.cfg = cfg;
+            if language_changed {
+                // The app switched languages in `apply`; follow it right away.
+                translate(hwnd, state);
+            }
             true
         }
         Err(e) => {
@@ -230,7 +259,7 @@ fn apply(hwnd: HWND, state: &mut State) -> bool {
 fn warn(hwnd: HWND, text: &str) {
     let wide: Vec<u16> = text.encode_utf16().chain(Some(0)).collect();
     unsafe {
-        MessageBoxW(Some(hwnd), PCWSTR(wide.as_ptr()), w!("Lowtide settings"), MB_ICONWARNING);
+        MessageBoxW(Some(hwnd), PCWSTR(wide.as_ptr()), &HSTRING::from(t().dlg_title), MB_ICONWARNING);
     }
 }
 
@@ -265,7 +294,7 @@ fn get_int(hwnd: HWND, id: i32, name: &str, min: i32, max: i32) -> Result<i32, (
     let mut ok = windows::core::BOOL(0);
     let v = unsafe { GetDlgItemInt(hwnd, id, Some(&mut ok), true) } as i32;
     if !ok.as_bool() || v < min || v > max {
-        return Err((id, format!("{name} must be a whole number from {min} to {max}.")));
+        return Err((id, fill!(t().err_range, field = name, min = min, max = max)));
     }
     Ok(v)
 }
@@ -281,6 +310,7 @@ fn get_check(hwnd: HWND, id: i32) -> bool {
 }
 
 fn fill_anchor_combo(hwnd: HWND, id: i32, current: Anchor) {
+    send(hwnd, id, CB_RESETCONTENT, 0, 0);
     for a in Anchor::ALL {
         let wide: Vec<u16> = a.label().encode_utf16().chain(Some(0)).collect();
         send(hwnd, id, CB_ADDSTRING, 0, wide.as_ptr() as isize);
@@ -294,6 +324,74 @@ fn get_anchor(hwnd: HWND, id: i32) -> Anchor {
     Anchor::ALL.get(i.max(0) as usize).copied().unwrap_or(Anchor::Center)
 }
 
+fn fill_language_combo(hwnd: HWND, current: LanguageSetting) {
+    send(hwnd, ids::LANGUAGE, CB_RESETCONTENT, 0, 0);
+    for l in LanguageSetting::ALL {
+        let wide: Vec<u16> = l.label().encode_utf16().chain(Some(0)).collect();
+        send(hwnd, ids::LANGUAGE, CB_ADDSTRING, 0, wide.as_ptr() as isize);
+    }
+    let index = LanguageSetting::ALL.iter().position(|&l| l == current).unwrap_or(0);
+    send(hwnd, ids::LANGUAGE, CB_SETCURSEL, index, 0);
+}
+
+fn get_language(hwnd: HWND) -> LanguageSetting {
+    let i = send(hwnd, ids::LANGUAGE, CB_GETCURSEL, 0, 0);
+    LanguageSetting::ALL.get(i.max(0) as usize).copied().unwrap_or_default()
+}
+
+/// Put the active language on every label, button and list, keeping selections.
+fn translate(hwnd: HWND, state: &State) {
+    let s = t();
+    unsafe {
+        let _ = SetWindowTextW(hwnd, &HSTRING::from(s.dlg_title));
+    }
+    for (id, text) in [
+        (ids::L_GENERAL, s.dlg_general),
+        (ids::L_THRESHOLD, s.dlg_threshold),
+        (ids::SUPPRESS, s.dlg_suppress),
+        (ids::L_POLL, s.dlg_poll),
+        (ids::L_SECONDS, s.dlg_seconds),
+        (ids::L_HOTKEY, s.dlg_hotkey),
+        (ids::AUTOSTART, s.dlg_autostart),
+        (ids::L_LANGUAGE, s.dlg_language),
+        (ids::L_ALERT_GROUP, s.dlg_alert_group),
+        (ids::L_MESSAGE, s.dlg_message),
+        (ids::L_PLACEHOLDERS, s.dlg_placeholders),
+        (ids::L_ALERT_POSITION, s.dlg_position),
+        (ids::L_ALERT_MARGIN, s.dlg_margin),
+        (ids::L_INFO_GROUP, s.dlg_info_group),
+        (ids::L_INFO_POSITION, s.dlg_position),
+        (ids::L_INFO_MARGIN, s.dlg_margin),
+        (ids::L_OFFSET_X, s.dlg_offset_x),
+        (ids::L_SHOW_FOR, s.dlg_show_for),
+        (ids::ALERT_STYLE + STYLE_FONT, s.dlg_font_alert),
+        (ids::INFO_STYLE + STYLE_FONT, s.dlg_font_info),
+        (ids::PREVIEW, s.dlg_preview),
+        (IDOK.0, s.dlg_ok),
+        (IDCANCEL.0, s.dlg_cancel),
+        (ids::APPLY, s.dlg_apply),
+    ] {
+        set_text(hwnd, id, text);
+    }
+    for (base, style) in [(ids::ALERT_STYLE, &state.cfg.alert.style), (ids::INFO_STYLE, &state.cfg.info.style)] {
+        set_text(hwnd, base + STYLE_FONT_LABEL, &font_label(style));
+        set_text(hwnd, base + STYLE_L_TEXT_COLOR, s.dlg_text_color);
+        set_text(hwnd, base + STYLE_L_TEXT_OPACITY, s.dlg_opacity);
+        set_text(hwnd, base + STYLE_L_PADDING, s.dlg_padding);
+        set_text(hwnd, base + STYLE_L_BACKGROUND, s.dlg_background);
+        set_text(hwnd, base + STYLE_L_BG_OPACITY, s.dlg_opacity);
+        set_text(hwnd, base + STYLE_L_RADIUS, s.dlg_radius);
+    }
+    // Lists are rebuilt in the new language with the current choice kept.
+    fill_anchor_combo(hwnd, ids::ALERT_ANCHOR, get_anchor(hwnd, ids::ALERT_ANCHOR));
+    fill_anchor_combo(hwnd, ids::INFO_ANCHOR, get_anchor(hwnd, ids::INFO_ANCHOR));
+    fill_language_combo(hwnd, get_language(hwnd));
+    // A default message is shown in the language it will be displayed in.
+    if state.cfg.alert.message.is_empty() {
+        set_text(hwnd, ids::ALERT_MSG, s.alert_default_message);
+    }
+}
+
 fn init_style(hwnd: HWND, base: i32, s: &TextStyle) {
     set_text(hwnd, base + STYLE_FONT_LABEL, &font_label(s));
     set_int(hwnd, base + STYLE_TEXT_OPACITY, base + STYLE_TEXT_OPACITY_SPIN, s.text_opacity.into(), 0, 100);
@@ -303,10 +401,11 @@ fn init_style(hwnd: HWND, base: i32, s: &TextStyle) {
 }
 
 fn read_style(hwnd: HWND, base: i32, s: &mut TextStyle) -> Result<(), (i32, String)> {
-    s.text_opacity = get_int(hwnd, base + STYLE_TEXT_OPACITY, "Text opacity", 0, 100)? as u8;
-    s.background_opacity = get_int(hwnd, base + STYLE_BG_OPACITY, "Background opacity", 0, 100)? as u8;
-    s.padding = get_int(hwnd, base + STYLE_PADDING, "Padding", 0, 200)? as u16;
-    s.corner_radius = get_int(hwnd, base + STYLE_RADIUS, "Corner radius", 0, 200)? as u16;
+    let n = t();
+    s.text_opacity = get_int(hwnd, base + STYLE_TEXT_OPACITY, n.field_text_opacity, 0, 100)? as u8;
+    s.background_opacity = get_int(hwnd, base + STYLE_BG_OPACITY, n.field_bg_opacity, 0, 100)? as u8;
+    s.padding = get_int(hwnd, base + STYLE_PADDING, n.field_padding, 0, 200)? as u16;
+    s.corner_radius = get_int(hwnd, base + STYLE_RADIUS, n.field_radius, 0, 200)? as u16;
     Ok(())
 }
 
@@ -322,6 +421,7 @@ fn init_controls(hwnd: HWND, state: &mut State) {
     set_check(hwnd, ids::SUPPRESS, c.suppress_while_charging);
     set_int(hwnd, ids::POLL, ids::POLL_SPIN, c.poll_interval_s as i32, 5, 3600);
     set_check(hwnd, ids::AUTOSTART, autostart::is_enabled());
+    fill_language_combo(hwnd, c.language);
 
     // Hotkey control: require Ctrl or Alt, like the config parser does.
     send(hwnd, ids::HOTKEY, HKM_SETRULES, (HKCOMB_NONE | HKCOMB_S) as usize, (HOTKEYF_CONTROL | HOTKEYF_ALT) as isize);
@@ -329,7 +429,7 @@ fn init_controls(hwnd: HWND, state: &mut State) {
     send(hwnd, ids::HOTKEY, HKM_SETHOTKEY, control_value as usize, 0);
     state.initial_hotkey_control = control_value;
 
-    set_text(hwnd, ids::ALERT_MSG, &c.alert.message);
+    set_text(hwnd, ids::ALERT_MSG, c.alert.effective_message());
     fill_anchor_combo(hwnd, ids::ALERT_ANCHOR, c.alert.anchor);
     set_int(hwnd, ids::ALERT_MARGIN, ids::ALERT_MARGIN_SPIN, c.alert.margin, -2000, 2000);
     init_style(hwnd, ids::ALERT_STYLE, &c.alert.style);
@@ -340,16 +440,19 @@ fn init_controls(hwnd: HWND, state: &mut State) {
     set_int(hwnd, ids::INFO_OFFY, ids::INFO_OFFY_SPIN, c.info.offset[1], -4000, 4000);
     set_int(hwnd, ids::INFO_DURATION, ids::INFO_DURATION_SPIN, c.info.duration_ms as i32, 100, 60_000);
     init_style(hwnd, ids::INFO_STYLE, &c.info.style);
+    translate(hwnd, state);
 }
 
 /// All dialog values as a config plus the autostart flag. On invalid input,
 /// tells the user, focuses the field and returns None.
 fn read_controls(hwnd: HWND, state: &State) -> Option<(Config, bool)> {
     let result = (|| -> Result<Config, (i32, String)> {
+        let n = t();
         let mut c = state.cfg.clone();
-        c.threshold_percent = get_int(hwnd, ids::THRESHOLD, "Alert threshold", 0, 100)? as u8;
+        c.language = get_language(hwnd);
+        c.threshold_percent = get_int(hwnd, ids::THRESHOLD, n.field_threshold, 0, 100)? as u8;
         c.suppress_while_charging = get_check(hwnd, ids::SUPPRESS);
-        c.poll_interval_s = get_int(hwnd, ids::POLL, "Check interval", 5, 3600)? as u32;
+        c.poll_interval_s = get_int(hwnd, ids::POLL, n.field_poll, 5, 3600)? as u32;
         let hk = send(hwnd, ids::HOTKEY, HKM_GETHOTKEY, 0, 0) as u16;
         c.hotkey = if hk == state.initial_hotkey_control {
             state.initial_hotkey.clone()
@@ -357,24 +460,24 @@ fn read_controls(hwnd: HWND, state: &State) -> Option<(Config, bool)> {
             Hotkey::from_control(hk).map(|h| h.to_string()).unwrap_or_default()
         };
         if let Err(e) = Hotkey::parse(&c.hotkey) {
-            return Err((ids::HOTKEY, format!("Hotkey: {e}.")));
+            return Err((ids::HOTKEY, fill!(n.err_hotkey, error = e)));
         }
 
         c.alert.message = get_text(hwnd, ids::ALERT_MSG);
         if c.alert.message.trim().is_empty() {
-            return Err((ids::ALERT_MSG, "The alert message must not be empty.".into()));
+            return Err((ids::ALERT_MSG, n.err_message_empty.into()));
         }
         c.alert.anchor = get_anchor(hwnd, ids::ALERT_ANCHOR);
-        c.alert.margin = get_int(hwnd, ids::ALERT_MARGIN, "Alert margin", -2000, 2000)?;
+        c.alert.margin = get_int(hwnd, ids::ALERT_MARGIN, n.field_alert_margin, -2000, 2000)?;
         read_style(hwnd, ids::ALERT_STYLE, &mut c.alert.style)?;
 
         c.info.anchor = get_anchor(hwnd, ids::INFO_ANCHOR);
-        c.info.margin = get_int(hwnd, ids::INFO_MARGIN, "Popup margin", -2000, 2000)?;
+        c.info.margin = get_int(hwnd, ids::INFO_MARGIN, n.field_info_margin, -2000, 2000)?;
         c.info.offset = [
-            get_int(hwnd, ids::INFO_OFFX, "Offset X", -4000, 4000)?,
-            get_int(hwnd, ids::INFO_OFFY, "Offset Y", -4000, 4000)?,
+            get_int(hwnd, ids::INFO_OFFX, n.field_offset_x, -4000, 4000)?,
+            get_int(hwnd, ids::INFO_OFFY, n.field_offset_y, -4000, 4000)?,
         ];
-        c.info.duration_ms = get_int(hwnd, ids::INFO_DURATION, "Popup duration", 100, 60_000)? as u32;
+        c.info.duration_ms = get_int(hwnd, ids::INFO_DURATION, n.field_duration, 100, 60_000)? as u32;
         read_style(hwnd, ids::INFO_STYLE, &mut c.info.style)?;
         Ok(c.sanitize())
     })();
@@ -395,22 +498,27 @@ fn read_controls(hwnd: HWND, state: &State) -> Option<(Config, bool)> {
 // ---- fonts and colours ------------------------------------------------------------------
 
 fn weight_name(w: u16) -> &'static str {
+    let s = t();
     match w {
-        0..=149 => "thin",
-        150..=249 => "extra light",
-        250..=349 => "light",
-        350..=449 => "regular",
-        450..=549 => "medium",
-        550..=649 => "semibold",
-        650..=749 => "bold",
-        750..=849 => "extra bold",
-        _ => "black",
+        0..=149 => s.weight_thin,
+        150..=249 => s.weight_extra_light,
+        250..=349 => s.weight_light,
+        350..=449 => s.weight_regular,
+        450..=549 => s.weight_medium,
+        550..=649 => s.weight_semibold,
+        650..=749 => s.weight_bold,
+        750..=849 => s.weight_extra_bold,
+        _ => s.weight_black,
     }
 }
 
-fn font_label(s: &TextStyle) -> String {
-    let italic = if s.italic { ", italic" } else { "" };
-    format!("{}, {} pt, {}{italic}", s.font_family, s.size_pt, weight_name(s.weight))
+fn font_label(style: &TextStyle) -> String {
+    let s = t();
+    let mut label = fill!(s.font_label, font = style.font_family, size = style.size_pt, weight = weight_name(style.weight));
+    if style.italic {
+        label.push_str(s.font_italic);
+    }
+    label
 }
 
 fn pick_font(hwnd: HWND, s: &mut TextStyle) -> bool {

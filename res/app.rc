@@ -7,99 +7,103 @@ IDI_APP ICON "lowtide.ico"
 
 #define SPIN_STYLE UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_AUTOBUDDY | UDS_ARROWKEYS | UDS_NOTHOUSANDS
 
-IDD_SETTINGS DIALOGEX 0, 0, 340, 344
+// Texts here are the English fallback; settings.rs replaces them at runtime
+// with the active language (every translatable label has an id for that).
+IDD_SETTINGS DIALOGEX 0, 0, 340, 361
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 EXSTYLE WS_EX_APPWINDOW
 CAPTION "Lowtide settings"
 FONT 9, "Segoe UI", 400, 0, 0x1
 BEGIN
-    GROUPBOX        "General", -1, 7, 7, 326, 72
-    LTEXT           "Alert when charge drops below", -1, 15, 21, 110, 8
+    GROUPBOX        "General", IDC_L_GENERAL, 7, 7, 326, 89
+    LTEXT           "Alert when charge drops below", IDC_L_THRESHOLD, 15, 21, 112, 8
     EDITTEXT        IDC_THRESHOLD, 130, 19, 36, 12, ES_NUMBER
     CONTROL         "", IDC_THRESHOLD_SPIN, UPDOWN_CLASS, SPIN_STYLE, 0, 0, 0, 0
     LTEXT           "%", -1, 170, 21, 10, 8
     AUTOCHECKBOX    "Don't alert while charging", IDC_SUPPRESS, 190, 20, 136, 10
-    LTEXT           "Check battery every", -1, 15, 38, 110, 8
+    LTEXT           "Check battery every", IDC_L_POLL, 15, 38, 112, 8
     EDITTEXT        IDC_POLL, 130, 36, 36, 12, ES_NUMBER
     CONTROL         "", IDC_POLL_SPIN, UPDOWN_CLASS, SPIN_STYLE, 0, 0, 0, 0
-    LTEXT           "seconds", -1, 170, 38, 30, 8
-    LTEXT           "Status hotkey", -1, 15, 55, 110, 8
+    LTEXT           "seconds", IDC_L_SECONDS, 170, 38, 50, 8
+    LTEXT           "Status hotkey", IDC_L_HOTKEY, 15, 55, 112, 8
     CONTROL         "", IDC_HOTKEY, HOTKEY_CLASS, WS_BORDER | WS_TABSTOP, 130, 53, 90, 13
     AUTOCHECKBOX    "Start with Windows", IDC_AUTOSTART, 230, 54, 96, 10
+    LTEXT           "Language", IDC_L_LANGUAGE, 15, 74, 112, 8
+    COMBOBOX        IDC_LANGUAGE, 130, 72, 130, 100, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
 
-    GROUPBOX        "Low-battery alert", -1, 7, 84, 326, 118
-    LTEXT           "Message", -1, 15, 98, 45, 8
-    EDITTEXT        IDC_ALERT_MSG, 62, 96, 264, 12, ES_AUTOHSCROLL
-    LTEXT           "Placeholders: {device}  {percent}  {status}.  One line per low device.", -1, 62, 111, 264, 8, WS_DISABLED
-    LTEXT           "Position", -1, 15, 127, 45, 8
-    COMBOBOX        IDC_ALERT_ANCHOR, 62, 125, 96, 120, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Margin", -1, 190, 127, 50, 8
-    EDITTEXT        IDC_ALERT_MARGIN, 245, 125, 34, 12
+    GROUPBOX        "Low-battery alert", IDC_L_ALERT_GROUP, 7, 101, 326, 118
+    LTEXT           "Message", IDC_L_MESSAGE, 15, 115, 45, 8
+    EDITTEXT        IDC_ALERT_MSG, 62, 113, 264, 12, ES_AUTOHSCROLL
+    LTEXT           "Placeholders: {device}  {percent}  {status}.  One line per low device.", IDC_L_PLACEHOLDERS, 62, 128, 264, 8, WS_DISABLED
+    LTEXT           "Position", IDC_L_ALERT_POSITION, 15, 144, 45, 8
+    COMBOBOX        IDC_ALERT_ANCHOR, 62, 142, 96, 120, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Margin", IDC_L_ALERT_MARGIN, 190, 144, 54, 8
+    EDITTEXT        IDC_ALERT_MARGIN, 246, 142, 34, 12
     CONTROL         "", IDC_ALERT_MARGIN_SPIN, UPDOWN_CLASS, SPIN_STYLE, 0, 0, 0, 0
-    LTEXT           "px", -1, 283, 127, 12, 8
-    PUSHBUTTON      "F&ont...", IDC_ALERT_STYLE + 0, 15, 143, 50, 14
-    LTEXT           "", IDC_ALERT_STYLE + 1, 70, 146, 256, 8
-    LTEXT           "Text color", -1, 15, 165, 45, 8
-    CONTROL         "", IDC_ALERT_STYLE + 2, "Button", BS_OWNERDRAW | WS_TABSTOP, 62, 162, 30, 14
-    LTEXT           "Opacity", -1, 100, 165, 28, 8
-    EDITTEXT        IDC_ALERT_STYLE + 3, 130, 163, 34, 12, ES_NUMBER
+    LTEXT           "px", -1, 284, 144, 12, 8
+    PUSHBUTTON      "F&ont...", IDC_ALERT_STYLE + 0, 15, 160, 50, 14
+    LTEXT           "", IDC_ALERT_STYLE + 1, 70, 163, 256, 8
+    LTEXT           "Text color", IDC_ALERT_STYLE + 12, 15, 182, 52, 8
+    CONTROL         "", IDC_ALERT_STYLE + 2, "Button", BS_OWNERDRAW | WS_TABSTOP, 68, 179, 26, 14
+    LTEXT           "Opacity", IDC_ALERT_STYLE + 13, 98, 182, 36, 8
+    EDITTEXT        IDC_ALERT_STYLE + 3, 135, 180, 30, 12, ES_NUMBER
     CONTROL         "", IDC_ALERT_STYLE + 4, UPDOWN_CLASS, SPIN_STYLE, 0, 0, 0, 0
-    LTEXT           "%", -1, 168, 165, 8, 8
-    LTEXT           "Padding", -1, 190, 165, 50, 8
-    EDITTEXT        IDC_ALERT_STYLE + 8, 245, 163, 34, 12, ES_NUMBER
+    LTEXT           "%", -1, 168, 182, 8, 8
+    LTEXT           "Padding", IDC_ALERT_STYLE + 14, 190, 182, 54, 8
+    EDITTEXT        IDC_ALERT_STYLE + 8, 246, 180, 34, 12, ES_NUMBER
     CONTROL         "", IDC_ALERT_STYLE + 9, UPDOWN_CLASS, SPIN_STYLE, 0, 0, 0, 0
-    LTEXT           "Background", -1, 15, 183, 45, 8
-    CONTROL         "", IDC_ALERT_STYLE + 5, "Button", BS_OWNERDRAW | WS_TABSTOP, 62, 180, 30, 14
-    LTEXT           "Opacity", -1, 100, 183, 28, 8
-    EDITTEXT        IDC_ALERT_STYLE + 6, 130, 181, 34, 12, ES_NUMBER
+    LTEXT           "Background", IDC_ALERT_STYLE + 15, 15, 200, 52, 8
+    CONTROL         "", IDC_ALERT_STYLE + 5, "Button", BS_OWNERDRAW | WS_TABSTOP, 68, 197, 26, 14
+    LTEXT           "Opacity", IDC_ALERT_STYLE + 16, 98, 200, 36, 8
+    EDITTEXT        IDC_ALERT_STYLE + 6, 135, 198, 30, 12, ES_NUMBER
     CONTROL         "", IDC_ALERT_STYLE + 7, UPDOWN_CLASS, SPIN_STYLE, 0, 0, 0, 0
-    LTEXT           "%", -1, 168, 183, 8, 8
-    LTEXT           "Corner radius", -1, 190, 183, 50, 8
-    EDITTEXT        IDC_ALERT_STYLE + 10, 245, 181, 34, 12, ES_NUMBER
+    LTEXT           "%", -1, 168, 200, 8, 8
+    LTEXT           "Corner radius", IDC_ALERT_STYLE + 17, 190, 200, 54, 8
+    EDITTEXT        IDC_ALERT_STYLE + 10, 246, 198, 34, 12, ES_NUMBER
     CONTROL         "", IDC_ALERT_STYLE + 11, UPDOWN_CLASS, SPIN_STYLE, 0, 0, 0, 0
 
-    GROUPBOX        "Status popup (hotkey)", -1, 7, 208, 326, 106
-    LTEXT           "Position", -1, 15, 223, 45, 8
-    COMBOBOX        IDC_INFO_ANCHOR, 62, 221, 96, 120, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Margin", -1, 190, 223, 50, 8
-    EDITTEXT        IDC_INFO_MARGIN, 245, 221, 34, 12
+    GROUPBOX        "Status popup (hotkey)", IDC_L_INFO_GROUP, 7, 225, 326, 106
+    LTEXT           "Position", IDC_L_INFO_POSITION, 15, 240, 45, 8
+    COMBOBOX        IDC_INFO_ANCHOR, 62, 238, 96, 120, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Margin", IDC_L_INFO_MARGIN, 190, 240, 54, 8
+    EDITTEXT        IDC_INFO_MARGIN, 246, 238, 34, 12
     CONTROL         "", IDC_INFO_MARGIN_SPIN, UPDOWN_CLASS, SPIN_STYLE, 0, 0, 0, 0
-    LTEXT           "px", -1, 283, 223, 12, 8
-    LTEXT           "Offset X", -1, 15, 241, 45, 8
-    EDITTEXT        IDC_INFO_OFFX, 62, 239, 34, 12
+    LTEXT           "px", -1, 284, 240, 12, 8
+    LTEXT           "Offset X", IDC_L_OFFSET_X, 15, 258, 45, 8
+    EDITTEXT        IDC_INFO_OFFX, 62, 256, 34, 12
     CONTROL         "", IDC_INFO_OFFX_SPIN, UPDOWN_CLASS, SPIN_STYLE, 0, 0, 0, 0
-    LTEXT           "Y", -1, 108, 241, 10, 8
-    EDITTEXT        IDC_INFO_OFFY, 130, 239, 34, 12
+    LTEXT           "Y", -1, 108, 258, 10, 8
+    EDITTEXT        IDC_INFO_OFFY, 135, 256, 30, 12
     CONTROL         "", IDC_INFO_OFFY_SPIN, UPDOWN_CLASS, SPIN_STYLE, 0, 0, 0, 0
-    LTEXT           "Show for", -1, 190, 241, 50, 8
-    EDITTEXT        IDC_INFO_DURATION, 245, 239, 40, 12, ES_NUMBER
+    LTEXT           "Show for", IDC_L_SHOW_FOR, 190, 258, 54, 8
+    EDITTEXT        IDC_INFO_DURATION, 246, 256, 40, 12, ES_NUMBER
     CONTROL         "", IDC_INFO_DURATION_SPIN, UPDOWN_CLASS, SPIN_STYLE, 0, 0, 0, 0
-    LTEXT           "ms", -1, 289, 241, 12, 8
-    PUSHBUTTON      "Fo&nt...", IDC_INFO_STYLE + 0, 15, 257, 50, 14
-    LTEXT           "", IDC_INFO_STYLE + 1, 70, 260, 256, 8
-    LTEXT           "Text color", -1, 15, 279, 45, 8
-    CONTROL         "", IDC_INFO_STYLE + 2, "Button", BS_OWNERDRAW | WS_TABSTOP, 62, 276, 30, 14
-    LTEXT           "Opacity", -1, 100, 279, 28, 8
-    EDITTEXT        IDC_INFO_STYLE + 3, 130, 277, 34, 12, ES_NUMBER
+    LTEXT           "ms", -1, 290, 258, 12, 8
+    PUSHBUTTON      "Fo&nt...", IDC_INFO_STYLE + 0, 15, 274, 50, 14
+    LTEXT           "", IDC_INFO_STYLE + 1, 70, 277, 256, 8
+    LTEXT           "Text color", IDC_INFO_STYLE + 12, 15, 296, 52, 8
+    CONTROL         "", IDC_INFO_STYLE + 2, "Button", BS_OWNERDRAW | WS_TABSTOP, 68, 293, 26, 14
+    LTEXT           "Opacity", IDC_INFO_STYLE + 13, 98, 296, 36, 8
+    EDITTEXT        IDC_INFO_STYLE + 3, 135, 294, 30, 12, ES_NUMBER
     CONTROL         "", IDC_INFO_STYLE + 4, UPDOWN_CLASS, SPIN_STYLE, 0, 0, 0, 0
-    LTEXT           "%", -1, 168, 279, 8, 8
-    LTEXT           "Padding", -1, 190, 279, 50, 8
-    EDITTEXT        IDC_INFO_STYLE + 8, 245, 277, 34, 12, ES_NUMBER
+    LTEXT           "%", -1, 168, 296, 8, 8
+    LTEXT           "Padding", IDC_INFO_STYLE + 14, 190, 296, 54, 8
+    EDITTEXT        IDC_INFO_STYLE + 8, 246, 294, 34, 12, ES_NUMBER
     CONTROL         "", IDC_INFO_STYLE + 9, UPDOWN_CLASS, SPIN_STYLE, 0, 0, 0, 0
-    LTEXT           "Background", -1, 15, 297, 45, 8
-    CONTROL         "", IDC_INFO_STYLE + 5, "Button", BS_OWNERDRAW | WS_TABSTOP, 62, 294, 30, 14
-    LTEXT           "Opacity", -1, 100, 297, 28, 8
-    EDITTEXT        IDC_INFO_STYLE + 6, 130, 295, 34, 12, ES_NUMBER
+    LTEXT           "Background", IDC_INFO_STYLE + 15, 15, 314, 52, 8
+    CONTROL         "", IDC_INFO_STYLE + 5, "Button", BS_OWNERDRAW | WS_TABSTOP, 68, 311, 26, 14
+    LTEXT           "Opacity", IDC_INFO_STYLE + 16, 98, 314, 36, 8
+    EDITTEXT        IDC_INFO_STYLE + 6, 135, 312, 30, 12, ES_NUMBER
     CONTROL         "", IDC_INFO_STYLE + 7, UPDOWN_CLASS, SPIN_STYLE, 0, 0, 0, 0
-    LTEXT           "%", -1, 168, 297, 8, 8
-    LTEXT           "Corner radius", -1, 190, 297, 50, 8
-    EDITTEXT        IDC_INFO_STYLE + 10, 245, 295, 34, 12, ES_NUMBER
+    LTEXT           "%", -1, 168, 314, 8, 8
+    LTEXT           "Corner radius", IDC_INFO_STYLE + 17, 190, 314, 54, 8
+    EDITTEXT        IDC_INFO_STYLE + 10, 246, 312, 34, 12, ES_NUMBER
     CONTROL         "", IDC_INFO_STYLE + 11, UPDOWN_CLASS, SPIN_STYLE, 0, 0, 0, 0
 
-    PUSHBUTTON      "&Preview", IDC_PREVIEW, 7, 322, 60, 14
-    DEFPUSHBUTTON   "OK", IDOK, 163, 322, 54, 14
-    PUSHBUTTON      "Cancel", IDCANCEL, 221, 322, 54, 14
-    PUSHBUTTON      "&Apply", IDC_APPLY, 279, 322, 54, 14
+    PUSHBUTTON      "&Preview", IDC_PREVIEW, 7, 339, 60, 14
+    DEFPUSHBUTTON   "OK", IDOK, 163, 339, 54, 14
+    PUSHBUTTON      "Cancel", IDCANCEL, 221, 339, 54, 14
+    PUSHBUTTON      "&Apply", IDC_APPLY, 279, 339, 54, 14
 END
 
 VS_VERSION_INFO VERSIONINFO
