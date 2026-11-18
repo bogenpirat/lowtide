@@ -116,8 +116,26 @@ the running instance.
 - language
 - for each overlay: position (9 anchors), margin or offset, popup duration,
   font, text and background colour, opacity, padding and corner radius
+- optionally, **fade in** the alert as the charge drops (see below)
 
 **Preview** shows both overlays with the unsaved settings.
+
+### Fade-in
+
+With *Fade in as the charge drops* turned on, the alert starts faint and gets
+more opaque as the battery runs down:
+
+- At the alert threshold it appears with the **start opacity**.
+- At the **end charge** it reaches the **end opacity**, and stays there below it.
+- In between, the opacity changes linearly with the charge.
+
+The opacity can only rise as the charge falls: the end opacity must be at least
+the start opacity, and the end charge must be below the threshold. The fade
+scales the whole overlay, on top of its text and background opacity. With
+several low devices, the lowest charge counts.
+
+For example, threshold 15 %, opacity from 20 % to 100 %, end charge 5 %: the
+alert is at 28 % opacity at 14 % charge, 60 % at 10 % and fully visible from 5 %.
 
 All percentages are 0–100. The settings live in
 `%APPDATA%\lowtide\config.toml`, which you can also edit by hand.
@@ -148,6 +166,12 @@ background = "#B00020"
 background_opacity = 80
 padding = 12
 corner_radius = 8
+
+[alert.fade]
+enabled = false      # opt-in
+start_opacity = 20   # % at the threshold
+end_opacity = 100    # % at end_percent and below; at least start_opacity
+end_percent = 5      # charge at which end_opacity is reached; below the threshold
 
 [info]
 anchor = "center"

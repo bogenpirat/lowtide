@@ -16,6 +16,14 @@
 #define IDC_ALERT_MARGIN        1012
 #define IDC_ALERT_MARGIN_SPIN   1013
 
+#define IDC_FADE                1030
+#define IDC_FADE_START          1031
+#define IDC_FADE_START_SPIN     1032
+#define IDC_FADE_END            1033
+#define IDC_FADE_END_SPIN       1034
+#define IDC_FADE_CHARGE         1035
+#define IDC_FADE_CHARGE_SPIN    1036
+
 #define IDC_INFO_ANCHOR         1020
 #define IDC_INFO_MARGIN         1021
 #define IDC_INFO_MARGIN_SPIN    1022
@@ -45,6 +53,12 @@
 #define IDC_L_PLACEHOLDERS      1409
 #define IDC_L_ALERT_POSITION    1410
 #define IDC_L_ALERT_MARGIN      1411
+#define IDC_L_FADE_DOWN_TO      1412
+#define IDC_L_FADE_CHARGE_UNIT  1413
+#define IDC_L_FADE_FROM         1414
+#define IDC_L_FADE_TO           1415
+#define IDC_L_FADE_START_UNIT   1416
+#define IDC_L_FADE_END_UNIT     1417
 #define IDC_L_INFO_GROUP        1420
 #define IDC_L_INFO_POSITION     1421
 #define IDC_L_INFO_MARGIN       1422

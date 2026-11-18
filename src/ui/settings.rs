@@ -20,7 +20,7 @@ use windows::Win32::UI::Controls::{
     HKM_SETHOTKEY, HKM_SETRULES, HOTKEYF_ALT, HOTKEYF_CONTROL, ODS_FOCUS, UDM_SETRANGE32,
 };
 use windows::Win32::UI::HiDpi::GetDpiForSystem;
-use windows::Win32::UI::Input::KeyboardAndMouse::SetFocus;
+use windows::Win32::UI::Input::KeyboardAndMouse::{EnableWindow, SetFocus};
 use windows::Win32::UI::WindowsAndMessaging::{
     DialogBoxParamW, EndDialog, GetDlgItem, GetDlgItemInt, GetDlgItemTextW,
     GetWindowLongPtrW, LoadIconW, MessageBoxW, SendDlgItemMessageW,
@@ -30,7 +30,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::autostart;
-use crate::config::{format_color, parse_color, Anchor, Config, TextStyle};
+use crate::config::{format_color, parse_color, Anchor, Config, FadeConfig, TextStyle};
 use crate::hotkey::Hotkey;
 use crate::i18n::{fill, t, LanguageSetting};
 
@@ -50,6 +50,13 @@ mod ids {
     pub const ALERT_ANCHOR: i32 = 1011;
     pub const ALERT_MARGIN: i32 = 1012;
     pub const ALERT_MARGIN_SPIN: i32 = 1013;
+    pub const FADE: i32 = 1030;
+    pub const FADE_START: i32 = 1031;
+    pub const FADE_START_SPIN: i32 = 1032;
+    pub const FADE_END: i32 = 1033;
+    pub const FADE_END_SPIN: i32 = 1034;
+    pub const FADE_CHARGE: i32 = 1035;
+    pub const FADE_CHARGE_SPIN: i32 = 1036;
     pub const INFO_ANCHOR: i32 = 1020;
     pub const INFO_MARGIN: i32 = 1021;
     pub const INFO_MARGIN_SPIN: i32 = 1022;
@@ -74,12 +81,34 @@ mod ids {
     pub const L_PLACEHOLDERS: i32 = 1409;
     pub const L_ALERT_POSITION: i32 = 1410;
     pub const L_ALERT_MARGIN: i32 = 1411;
+    pub const L_FADE_DOWN_TO: i32 = 1412;
+    pub const L_FADE_CHARGE_UNIT: i32 = 1413;
+    pub const L_FADE_FROM: i32 = 1414;
+    pub const L_FADE_TO: i32 = 1415;
+    pub const L_FADE_START_UNIT: i32 = 1416;
+    pub const L_FADE_END_UNIT: i32 = 1417;
     pub const L_INFO_GROUP: i32 = 1420;
     pub const L_INFO_POSITION: i32 = 1421;
     pub const L_INFO_MARGIN: i32 = 1422;
     pub const L_OFFSET_X: i32 = 1423;
     pub const L_SHOW_FOR: i32 = 1424;
 }
+
+/// Fade fields, greyed out while fading is off.
+const FADE_CONTROLS: [i32; 12] = [
+    ids::L_FADE_DOWN_TO,
+    ids::FADE_CHARGE,
+    ids::FADE_CHARGE_SPIN,
+    ids::L_FADE_CHARGE_UNIT,
+    ids::L_FADE_FROM,
+    ids::FADE_START,
+    ids::FADE_START_SPIN,
+    ids::L_FADE_START_UNIT,
+    ids::L_FADE_TO,
+    ids::FADE_END,
+    ids::FADE_END_SPIN,
+    ids::L_FADE_END_UNIT,
+];
 
 // Offsets within a text-style block.
 const STYLE_FONT: i32 = 0;
@@ -212,6 +241,7 @@ fn on_command(hwnd: HWND, state: &mut State, id: i32) {
         ids::APPLY => {
             apply(hwnd, state);
         }
+        ids::FADE => enable_fade_controls(hwnd),
         ids::PREVIEW => {
             if let Some((cfg, _)) = read_controls(hwnd, state) {
                 (state.hooks.preview)(&cfg);
@@ -299,6 +329,36 @@ fn get_int(hwnd: HWND, id: i32, name: &str, min: i32, max: i32) -> Result<i32, (
     Ok(v)
 }
 
+fn enable_fade_controls(hwnd: HWND) {
+    let on = get_check(hwnd, ids::FADE);
+    for id in FADE_CONTROLS {
+        unsafe {
+            if let Ok(ctrl) = GetDlgItem(Some(hwnd), id) {
+                let _ = EnableWindow(ctrl, on);
+            }
+        }
+    }
+}
+
+/// The fade fields, checked against each other and the threshold:
+/// opacity rises (or stays) and the charge falls while fading in.
+fn read_fade(hwnd: HWND, threshold: u8) -> Result<FadeConfig, (i32, String)> {
+    let n = t();
+    let fade = FadeConfig {
+        enabled: get_check(hwnd, ids::FADE),
+        start_opacity: get_int(hwnd, ids::FADE_START, n.field_fade_start, 0, 100)? as u8,
+        end_opacity: get_int(hwnd, ids::FADE_END, n.field_fade_end, 0, 100)? as u8,
+        end_percent: get_int(hwnd, ids::FADE_CHARGE, n.field_fade_charge, 0, 100)? as u8,
+    };
+    if fade.end_opacity < fade.start_opacity {
+        return Err((ids::FADE_END, n.err_fade_opacity.into()));
+    }
+    if fade.end_percent >= threshold && threshold > 0 {
+        return Err((ids::FADE_CHARGE, fill!(n.err_fade_charge, threshold = threshold)));
+    }
+    Ok(fade)
+}
+
 fn set_check(hwnd: HWND, id: i32, on: bool) {
     unsafe {
         let _ = CheckDlgButton(hwnd, id, if on { BST_CHECKED } else { BST_UNCHECKED });
@@ -359,6 +419,11 @@ fn translate(hwnd: HWND, state: &State) {
         (ids::L_PLACEHOLDERS, s.dlg_placeholders),
         (ids::L_ALERT_POSITION, s.dlg_position),
         (ids::L_ALERT_MARGIN, s.dlg_margin),
+        (ids::FADE, s.dlg_fade),
+        (ids::L_FADE_DOWN_TO, s.dlg_fade_down_to),
+        (ids::L_FADE_CHARGE_UNIT, s.dlg_fade_charge_unit),
+        (ids::L_FADE_FROM, s.dlg_fade_from),
+        (ids::L_FADE_TO, s.dlg_fade_to),
         (ids::L_INFO_GROUP, s.dlg_info_group),
         (ids::L_INFO_POSITION, s.dlg_position),
         (ids::L_INFO_MARGIN, s.dlg_margin),
@@ -433,6 +498,11 @@ fn init_controls(hwnd: HWND, state: &mut State) {
     fill_anchor_combo(hwnd, ids::ALERT_ANCHOR, c.alert.anchor);
     set_int(hwnd, ids::ALERT_MARGIN, ids::ALERT_MARGIN_SPIN, c.alert.margin, -2000, 2000);
     init_style(hwnd, ids::ALERT_STYLE, &c.alert.style);
+    set_check(hwnd, ids::FADE, c.alert.fade.enabled);
+    set_int(hwnd, ids::FADE_CHARGE, ids::FADE_CHARGE_SPIN, c.alert.fade.end_percent.into(), 0, 100);
+    set_int(hwnd, ids::FADE_START, ids::FADE_START_SPIN, c.alert.fade.start_opacity.into(), 0, 100);
+    set_int(hwnd, ids::FADE_END, ids::FADE_END_SPIN, c.alert.fade.end_opacity.into(), 0, 100);
+    enable_fade_controls(hwnd);
 
     fill_anchor_combo(hwnd, ids::INFO_ANCHOR, c.info.anchor);
     set_int(hwnd, ids::INFO_MARGIN, ids::INFO_MARGIN_SPIN, c.info.margin, -2000, 2000);
@@ -470,6 +540,12 @@ fn read_controls(hwnd: HWND, state: &State) -> Option<(Config, bool)> {
         c.alert.anchor = get_anchor(hwnd, ids::ALERT_ANCHOR);
         c.alert.margin = get_int(hwnd, ids::ALERT_MARGIN, n.field_alert_margin, -2000, 2000)?;
         read_style(hwnd, ids::ALERT_STYLE, &mut c.alert.style)?;
+        // Greyed-out fade fields are not validated; invalid ones keep the old values.
+        match read_fade(hwnd, c.threshold_percent) {
+            Ok(fade) => c.alert.fade = fade,
+            Err(e) if get_check(hwnd, ids::FADE) => return Err(e),
+            Err(_) => c.alert.fade.enabled = false,
+        }
 
         c.info.anchor = get_anchor(hwnd, ids::INFO_ANCHOR);
         c.info.margin = get_int(hwnd, ids::INFO_MARGIN, n.field_info_margin, -2000, 2000)?;

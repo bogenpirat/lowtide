@@ -124,6 +124,55 @@ pub struct AlertConfig {
     /// Distance from the work-area edge, in DIPs.
     pub margin: i32,
     pub style: TextStyle,
+    pub fade: FadeConfig,
+}
+
+/// Opt-in: the alert fades in as the charge drops. It appears at the alert
+/// threshold with `start_opacity` and reaches `end_opacity` at `end_percent`;
+/// in between the opacity is interpolated linearly. The fade scales the whole
+/// overlay, on top of the text and background opacity of its style.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
+pub struct FadeConfig {
+    pub enabled: bool,
+    /// 0-100 %, at the alert threshold.
+    pub start_opacity: u8,
+    /// 0-100 %, at least `start_opacity`.
+    pub end_opacity: u8,
+    /// Charge (0-100 %) at which `end_opacity` is reached; at most the threshold.
+    pub end_percent: u8,
+}
+
+impl Default for FadeConfig {
+    fn default() -> Self {
+        FadeConfig { enabled: false, start_opacity: 20, end_opacity: 100, end_percent: 5 }
+    }
+}
+
+impl FadeConfig {
+    /// Overlay opacity (0-100 %) at `percent` charge for an alert that starts below `threshold`.
+    pub fn opacity(&self, threshold: u8, percent: u8) -> u8 {
+        if !self.enabled {
+            return 100;
+        }
+        if percent <= self.end_percent {
+            return self.end_opacity;
+        }
+        if percent >= threshold {
+            return self.start_opacity;
+        }
+        // end_percent < percent < threshold, so the span is never zero.
+        let progress = f32::from(threshold - percent) / f32::from(threshold - self.end_percent);
+        let span = f32::from(self.end_opacity) - f32::from(self.start_opacity);
+        (f32::from(self.start_opacity) + span * progress).round() as u8
+    }
+
+    /// Clamp to 0-100 and keep the direction: opacity rises while the charge falls.
+    fn sanitize(&mut self, threshold: u8) {
+        self.start_opacity = self.start_opacity.min(100);
+        self.end_opacity = self.end_opacity.clamp(self.start_opacity, 100);
+        self.end_percent = self.end_percent.min(threshold);
+    }
 }
 
 impl AlertConfig {
@@ -140,6 +189,7 @@ impl Default for AlertConfig {
             anchor: Anchor::BottomRight,
             margin: 24,
             style: TextStyle::default(),
+            fade: FadeConfig::default(),
         }
     }
 }
@@ -212,6 +262,7 @@ impl Config {
         self.info.offset = self.info.offset.map(|v| v.clamp(-4000, 4000));
         self.info.duration_ms = self.info.duration_ms.clamp(100, 60_000);
         self.alert.style.sanitize(&defaults.alert.style);
+        self.alert.fade.sanitize(self.threshold_percent);
         self.info.style.sanitize(&defaults.info.style);
         // A default message saved in any language means "default", so it
         // follows a later language change instead of sticking in one language.
@@ -341,6 +392,65 @@ message = \"Charge {device}!\"
     fn language_defaults_to_auto() {
         assert_eq!(Config::from_toml("").unwrap().language, LanguageSetting::Auto);
         assert_eq!(Config::from_toml("language = \"swabian\"").unwrap().language, LanguageSetting::Swabian);
+    }
+
+    fn fade(start_opacity: u8, end_opacity: u8, end_percent: u8) -> FadeConfig {
+        FadeConfig { enabled: true, start_opacity, end_opacity, end_percent }
+    }
+
+    #[test]
+    fn fade_is_off_by_default_and_then_fully_opaque() {
+        let f = FadeConfig::default();
+        assert!(!f.enabled);
+        assert_eq!(f.opacity(15, 14), 100);
+        assert_eq!(f.opacity(15, 0), 100);
+    }
+
+    #[test]
+    fn fade_interpolates_linearly_between_threshold_and_end_charge() {
+        let f = fade(20, 100, 5);
+        assert_eq!(f.opacity(15, 15), 20);
+        assert_eq!(f.opacity(15, 14), 28);
+        assert_eq!(f.opacity(15, 10), 60);
+        assert_eq!(f.opacity(15, 6), 92);
+        assert_eq!(f.opacity(15, 5), 100);
+    }
+
+    #[test]
+    fn fade_holds_its_ends_outside_the_range() {
+        let f = fade(30, 90, 5);
+        // Hysteresis keeps the alert up to 2 points above the threshold.
+        assert_eq!(f.opacity(15, 16), 30);
+        assert_eq!(f.opacity(15, 2), 90);
+        assert_eq!(f.opacity(15, 0), 90);
+    }
+
+    #[test]
+    fn fade_with_no_charge_span_jumps_to_the_end_opacity() {
+        let f = fade(20, 80, 15);
+        assert_eq!(f.opacity(15, 15), 80);
+        assert_eq!(f.opacity(15, 14), 80);
+        assert_eq!(fade(20, 80, 0).opacity(0, 0), 80);
+    }
+
+    #[test]
+    fn fade_is_sanitized_to_rising_opacity_and_falling_charge() {
+        let cfg = Config::from_toml(
+            "threshold_percent = 15
+[alert.fade]
+enabled = true
+start_opacity = 120
+end_opacity = 50
+end_percent = 40
+",
+        )
+        .unwrap();
+        assert_eq!(cfg.alert.fade, fade(100, 100, 15));
+        let cfg = Config::from_toml("[alert.fade]
+start_opacity = 60
+end_opacity = 40
+").unwrap();
+        assert_eq!((cfg.alert.fade.start_opacity, cfg.alert.fade.end_opacity), (60, 60));
     }
 
     #[test]

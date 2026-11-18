@@ -37,7 +37,7 @@ use windows::Win32::UI::Controls::{
 use super::overlay::{self, Overlay, Placement};
 use super::settings;
 use super::tray::{IconState, Tray};
-use crate::alert::{alert_text, info_text, AlertState};
+use crate::alert::{alert_opacity, alert_text, info_text, AlertState};
 use crate::autostart;
 use crate::config::Config;
 use crate::hotkey::Hotkey;
@@ -248,9 +248,10 @@ impl App {
             self.alert.hide();
         } else {
             let text = alert_text(self.config.alert.effective_message(), &low);
+            let opacity = alert_opacity(&self.config, &low);
             let a = &self.config.alert;
             let placement = Placement { anchor: a.anchor, margin: a.margin, offset: [0, 0] };
-            let _ = self.alert.show(&text, &a.style, &placement);
+            let _ = self.alert.show(&text, &a.style, &placement, opacity);
             if self.info.is_visible() {
                 // A changed alert must not cover the popup the user just asked for.
                 self.info.raise();
@@ -317,7 +318,7 @@ impl App {
         let text = info_text(&self.snapshot, SystemTime::now());
         let i = &self.config.info;
         let placement = Placement { anchor: i.anchor, margin: i.margin, offset: i.offset };
-        let _ = self.info.show(&text, &i.style, &placement);
+        let _ = self.info.show(&text, &i.style, &placement, 100);
     }
 
     /// Hotkey or tray click: show the popup now, restart its timer, and ask for
@@ -344,7 +345,8 @@ impl App {
         };
         let a = &cfg.alert;
         let placement = Placement { anchor: a.anchor, margin: a.margin, offset: [0, 0] };
-        let _ = self.alert.show(&alert_text(a.effective_message(), &[&sample]), &a.style, &placement);
+        let opacity = alert_opacity(cfg, &[&sample]);
+        let _ = self.alert.show(&alert_text(a.effective_message(), &[&sample]), &a.style, &placement, opacity);
 
         let snap = if self.snapshot.devices.is_empty() {
             Snapshot { devices: vec![sample] }
@@ -353,7 +355,7 @@ impl App {
         };
         let i = &cfg.info;
         let placement = Placement { anchor: i.anchor, margin: i.margin, offset: i.offset };
-        let _ = self.info.show(&info_text(&snap, SystemTime::now()), &i.style, &placement);
+        let _ = self.info.show(&info_text(&snap, SystemTime::now()), &i.style, &placement, 100);
         unsafe {
             SetTimer(Some(self.hwnd), TIMER_INFO, i.duration_ms, None);
         }

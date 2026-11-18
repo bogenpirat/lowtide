@@ -53,6 +53,8 @@ struct Content {
     text: String,
     style: TextStyle,
     placement: Placement,
+    /// Whole-window opacity, 0-100 %, on top of the style's own opacities.
+    opacity: u8,
 }
 
 pub struct Overlay {
@@ -108,9 +110,10 @@ impl Overlay {
         self.visible
     }
 
-    /// Show (or update) the overlay. Re-renders only if something changed.
-    pub fn show(&mut self, text: &str, style: &TextStyle, placement: &Placement) -> Result<()> {
-        let content = Content { text: text.into(), style: style.clone(), placement: placement.clone() };
+    /// Show (or update) the overlay at `opacity` (0-100 %) as a whole.
+    /// Re-renders only if something changed.
+    pub fn show(&mut self, text: &str, style: &TextStyle, placement: &Placement, opacity: u8) -> Result<()> {
+        let content = Content { text: text.into(), style: style.clone(), placement: placement.clone(), opacity };
         if self.content.as_ref() != Some(&content) || !self.visible {
             self.render(&content)?;
             self.content = Some(content);
@@ -225,7 +228,7 @@ impl Overlay {
                     let blend = BLENDFUNCTION {
                         BlendOp: AC_SRC_OVER as u8,
                         BlendFlags: 0,
-                        SourceConstantAlpha: 255,
+                        SourceConstantAlpha: constant_alpha(c.opacity),
                         AlphaFormat: AC_SRC_ALPHA as u8,
                     };
                     UpdateLayeredWindow(
@@ -324,6 +327,11 @@ fn color(hex: &str, opacity_percent: u8) -> D2D1_COLOR_F {
     }
 }
 
+/// 0-100 % -> the 0-255 alpha `UpdateLayeredWindow` applies to every pixel.
+fn constant_alpha(opacity_percent: u8) -> u8 {
+    ((u32::from(opacity_percent.min(100)) * 255 + 50) / 100) as u8
+}
+
 fn alignment_for(anchor: Anchor) -> DWRITE_TEXT_ALIGNMENT {
     match anchor {
         Anchor::TopLeft | Anchor::Left | Anchor::BottomLeft => DWRITE_TEXT_ALIGNMENT_LEADING,
@@ -378,6 +386,14 @@ mod tests {
 
     // 1920x1080 monitor with a 48 px taskbar at the bottom.
     const WORK: RECT = RECT { left: 0, top: 0, right: 1920, bottom: 1032 };
+
+    #[test]
+    fn opacity_maps_to_constant_alpha() {
+        assert_eq!(constant_alpha(0), 0);
+        assert_eq!(constant_alpha(50), 128);
+        assert_eq!(constant_alpha(100), 255);
+        assert_eq!(constant_alpha(200), 255);
+    }
 
     #[test]
     fn corners_respect_margin_and_work_area() {

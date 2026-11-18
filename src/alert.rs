@@ -88,6 +88,13 @@ pub fn alert_text(template: &str, devices: &[&DeviceState]) -> String {
         .join("\n")
 }
 
+/// Opacity (0-100 %) of the alert overlay: with fading enabled, it follows the
+/// lowest charge among the devices shown.
+pub fn alert_opacity(cfg: &Config, devices: &[&DeviceState]) -> u8 {
+    let lowest = devices.iter().filter_map(|d| d.battery.as_ref()).map(|b| b.percent).min();
+    lowest.map_or(100, |p| cfg.alert.fade.opacity(cfg.threshold_percent, p))
+}
+
 /// Info popup text: everything worth knowing about every device.
 pub fn info_text(snap: &Snapshot, now: SystemTime) -> String {
     if snap.devices.is_empty() {
@@ -146,6 +153,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+    use crate::config::FadeConfig;
     use crate::model::{BatteryInfo, ChargeState, Connection};
 
     fn device(name: &str, percent: u8, charge: ChargeState) -> DeviceState {
@@ -259,6 +267,17 @@ mod tests {
         let mut d = device("m", 5, ChargeState::Discharging);
         d.stale = true;
         assert_eq!(alerting(&mut st, vec![d], &cfg), ["m"]);
+    }
+
+    #[test]
+    fn alert_opacity_follows_the_lowest_device_when_fading() {
+        let a = device("a", 12, ChargeState::Discharging);
+        let b = device("b", 10, ChargeState::Discharging);
+        let mut cfg = Config { threshold_percent: 15, ..Config::default() };
+        assert_eq!(alert_opacity(&cfg, &[&a, &b]), 100, "fading is opt-in");
+        cfg.alert.fade = FadeConfig { enabled: true, start_opacity: 20, end_opacity: 100, end_percent: 5 };
+        assert_eq!(alert_opacity(&cfg, &[&a]), 44);
+        assert_eq!(alert_opacity(&cfg, &[&a, &b]), 60);
     }
 
     #[test]
