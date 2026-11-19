@@ -3,12 +3,14 @@
 mod alert;
 mod autostart;
 mod config;
+mod history;
 mod hotkey;
 mod i18n;
 mod model;
 mod monitor;
 mod probe;
 mod sources;
+mod stats;
 mod ui;
 
 use windows::core::w;
@@ -31,22 +33,29 @@ fn main() {
         .map(|i| args.get(i + 1).and_then(|s| s.parse::<u8>().ok()).unwrap_or(5));
 
     let open_settings = args.iter().any(|a| a == "--settings");
+    let open_statistics = args.iter().any(|a| a == "--statistics");
 
     // One instance per user session; starting again shows the status popup
-    // (or, with --settings, the settings dialog) of the running instance.
+    // (or, with --settings / --statistics, that window) of the running instance.
     // The handle is intentionally leaked: it must live as long as the process.
     let _mutex = unsafe { CreateMutexW(None, false, w!("Local\\Lowtide.SingleInstance")) };
     if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS && simulate.is_none() {
         unsafe {
             if let Ok(hwnd) = FindWindowW(ui::app::MAIN_CLASS, None) {
-                let msg = if open_settings { ui::app::WM_APP_OPEN_SETTINGS } else { ui::app::WM_APP_SHOW_INFO };
+                let msg = if open_settings {
+                    ui::app::WM_APP_OPEN_SETTINGS
+                } else if open_statistics {
+                    ui::app::WM_APP_OPEN_STATISTICS
+                } else {
+                    ui::app::WM_APP_SHOW_INFO
+                };
                 let _ = PostMessageW(Some(hwnd), msg, WPARAM(0), LPARAM(0));
             }
         }
         return;
     }
 
-    if let Err(e) = ui::app::run(ui::app::Options { simulate, open_settings }) {
+    if let Err(e) = ui::app::run(ui::app::Options { simulate, open_settings, open_statistics }) {
         let text: Vec<u16> = i18n::fill!(i18n::t().start_failed, error = e).encode_utf16().chain(Some(0)).collect();
         unsafe {
             MessageBoxW(None, windows::core::PCWSTR(text.as_ptr()), w!("Lowtide"), MB_ICONERROR);

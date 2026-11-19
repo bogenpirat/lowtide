@@ -73,7 +73,7 @@ once, as wired. The two paths are matched by the device's unit ID.
 | Action | Result |
 |---|---|
 | **Left-click** the tray icon, or press the hotkey | Show the status popup |
-| **Right-click** the tray icon | *Show battery status*, *Refresh now*, *Mute low-battery alert*, *Settings…*, *Quit* |
+| **Right-click** the tray icon | *Show battery status*, *Refresh now*, *Mute low-battery alert*, *Statistics…*, *Settings…*, *Quit* |
 
 The tray icon shows the lowest charge across your devices:
 
@@ -94,6 +94,40 @@ Muting hides the alert overlay for the devices that are low right now.
 The low-battery alert and the status popup are independent. The popup never
 hides an active alert.
 
+### 📊 Statistics
+
+*Statistics…* opens a window with the battery history of each device:
+
+- **Forecast**: how many days the current charge lasts (and on which date it
+  runs out), when the alert threshold will be reached, and how long a full
+  charge typically lasts.
+- **Usage** over the last 24 hours, 7 days, 30 days and all time: charge used,
+  use per day, number of charges, and how many days of data that covers.
+- **Charging**: when the device was last charged, how often you charge, how
+  long charging to full takes, and the lowest charge of the last 30 days.
+- A **bar chart** of the charge used per day over the last 30 days.
+
+How the numbers are worked out:
+
+- Use is averaged over **calendar days**, including days the PC was off, so
+  "lasts 12 more days" means 12 days on the calendar. Time spent on external
+  power is left out.
+- The forecast uses the last 7 days once they hold at least 3 days of data,
+  otherwise all data so far. It needs at least half a day of data.
+- A full charge lasts as long as the median of the complete discharge cycles
+  seen so far (starting at 90 % or more, using at least 20 points), scaled to
+  100 points. Before the first complete cycle, it is extrapolated from the
+  usage of the last 30 days.
+- A charge is a time on external power that raised the charge. A jump of 5
+  points or more while discharging also counts: the device was charged
+  elsewhere, or its battery was swapped.
+- Only new lows count as use, so a voltage-estimated charge (G903) that bounces
+  up and down by a point or two is not counted twice.
+
+The window stays open next to everything else and updates as new readings come
+in. The history is recorded whenever Lowtide runs (see
+[Battery history](#battery-history)).
+
 ### Command line
 
 | Flag | Effect |
@@ -102,6 +136,7 @@ hides an active alert.
 | `--watch [seconds]` | Run the monitor and print every update (events and polls) live. |
 | `--simulate N` | Use a fake device at N % to try out overlays and settings. |
 | `--settings` | Open the settings dialog (of the running instance, if there is one). |
+| `--statistics` | Open the statistics window (of the running instance, if there is one). |
 
 Starting `lowtide.exe` while it is already running shows the status popup of
 the running instance.
@@ -183,6 +218,22 @@ duration_ms = 2500
 
 </details>
 
+### Battery history
+
+Every change of a device's charge or charging state is appended to
+`%APPDATA%\lowtide\history.csv`, one line per change:
+
+```text
+unix_secs,device,percent,state,estimated,name
+1763560000,logitech_hidpp:unit:1A2B3C4D,84,d,0,PRO 2 LIGHTSPEED
+```
+
+`state` is `d` (on battery), `c` (charging or on external power) or `f`
+(full), and `estimated` is `1` for a voltage-based percentage. Commas, `%` and
+line breaks in text fields are written as `%2C`, `%25` and `%0A`. The history
+is kept in full and grows by a few hundred KB per device per year. Delete the
+file to start over. `--simulate` never writes to it.
+
 ### 🌍 Languages
 
 Lowtide speaks **English**, **German** (Deutsch) and **Swabian** (Schwäbisch).
@@ -207,6 +258,8 @@ same `{placeholders}`. To add a language, add a table and a `Language` variant.
     on both collections.
 - **`src/monitor.rs`**: the source-agnostic loop. It runs scheduled polls,
   rescans after plug and unplug (rate-limited), and publishes snapshots.
+- **`src/history.rs`, `src/stats.rs`**: the battery history file, and the
+  statistics computed from it (plain Rust, no Win32, unit-tested).
 - **`src/ui`**: a hidden top-level window (tray, hotkey, device and display
   changes) plus two layered overlay windows.
   - The overlays are drawn with Direct2D (software target) and DirectWrite

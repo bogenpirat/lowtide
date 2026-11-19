@@ -31,15 +31,18 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use windows::Win32::UI::Controls::{
-    InitCommonControlsEx, ICC_HOTKEY_CLASS, ICC_STANDARD_CLASSES, ICC_UPDOWN_CLASS, INITCOMMONCONTROLSEX,
+    InitCommonControlsEx, ICC_HOTKEY_CLASS, ICC_LISTVIEW_CLASSES, ICC_STANDARD_CLASSES, ICC_UPDOWN_CLASS,
+    INITCOMMONCONTROLSEX,
 };
 
 use super::overlay::{self, Overlay, Placement};
 use super::settings;
+use super::statistics;
 use super::tray::{IconState, Tray};
 use crate::alert::{alert_opacity, alert_text, info_text, AlertState};
 use crate::autostart;
 use crate::config::Config;
+use crate::history::History;
 use crate::hotkey::Hotkey;
 use crate::i18n::{self, fill, t};
 use crate::model::{BatteryInfo, ChargeState, Connection, DeviceId, DeviceState, Snapshot};
@@ -54,6 +57,10 @@ const WM_APP_TRAY: u32 = WM_APP + 2;
 pub const WM_APP_SHOW_INFO: u32 = WM_APP + 3;
 /// Sent by `lowtide --settings` (or posted to ourselves at startup): open the settings dialog.
 pub const WM_APP_OPEN_SETTINGS: u32 = WM_APP + 4;
+/// Sent by `lowtide --statistics` (or posted to ourselves at startup): open the statistics window.
+pub const WM_APP_OPEN_STATISTICS: u32 = WM_APP + 5;
+/// Statistics window -> app: recompute its numbers (they age even without new readings).
+const WM_APP_REFRESH_STATISTICS: u32 = WM_APP + 6;
 
 /// Keyboard activation of the tray icon (not exported by the windows crate).
 const NIN_KEYSELECT: u32 = NIN_SELECT | NINF_KEY;
@@ -68,10 +75,12 @@ const MENU_REFRESH: usize = 2;
 const MENU_SETTINGS: usize = 3;
 const MENU_QUIT: usize = 4;
 const MENU_MUTE: usize = 5;
+const MENU_STATISTICS: usize = 6;
 
 pub struct Options {
     pub simulate: Option<u8>,
     pub open_settings: bool,
+    pub open_statistics: bool,
 }
 
 struct App {
@@ -87,6 +96,9 @@ struct App {
     hotkey_registered: bool,
     taskbar_created: u32,
     devnotify: Option<HDEVNOTIFY>,
+    history: History,
+    /// A failed history write is reported once, not on every snapshot.
+    history_error_shown: bool,
 }
 
 thread_local! {
@@ -115,7 +127,7 @@ pub fn run(opts: Options) -> Result<()> {
     unsafe {
         let icc = INITCOMMONCONTROLSEX {
             dwSize: size_of::<INITCOMMONCONTROLSEX>() as u32,
-            dwICC: ICC_STANDARD_CLASSES | ICC_HOTKEY_CLASS | ICC_UPDOWN_CLASS,
+            dwICC: ICC_STANDARD_CLASSES | ICC_HOTKEY_CLASS | ICC_UPDOWN_CLASS | ICC_LISTVIEW_CLASSES,
         };
         let _ = InitCommonControlsEx(&icc);
         let instance = GetModuleHandleW(None)?;
@@ -178,6 +190,9 @@ pub fn run(opts: Options) -> Result<()> {
             hotkey_registered: false,
             taskbar_created: RegisterWindowMessageW(w!("TaskbarCreated")),
             devnotify: register_hid_arrival(hwnd),
+            // A simulated device must not end up in the real history.
+            history: if opts.simulate.is_some() { History::in_memory() } else { History::load() },
+            history_error_shown: false,
         };
         if let Some(e) = config_error {
             app.tray.notify(t().notify_config_error, &e);
@@ -189,9 +204,15 @@ pub fn run(opts: Options) -> Result<()> {
         if opts.open_settings {
             let _ = PostMessageW(Some(hwnd), WM_APP_OPEN_SETTINGS, WPARAM(0), LPARAM(0));
         }
+        if opts.open_statistics {
+            let _ = PostMessageW(Some(hwnd), WM_APP_OPEN_STATISTICS, WPARAM(0), LPARAM(0));
+        }
 
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).into() {
+            if statistics::is_dialog_message(&msg) {
+                continue;
+            }
             let _ = TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
@@ -235,10 +256,40 @@ impl App {
 
     fn on_snapshot(&mut self) {
         self.snapshot = self.shared.lock().unwrap().clone();
+        self.record_history();
         self.update_alert();
         self.update_tray();
         if self.info.is_visible() {
             self.render_info();
+        }
+        self.refresh_statistics();
+    }
+
+    fn record_history(&mut self) {
+        match self.history.record(&self.snapshot, SystemTime::now()) {
+            Ok(()) => self.history_error_shown = false,
+            Err(e) if !self.history_error_shown => {
+                self.history_error_shown = true;
+                self.tray.notify(t().notify_history_failed, &e.to_string());
+            }
+            Err(_) => {}
+        }
+    }
+
+    fn statistics_input(&self) -> statistics::Input {
+        statistics::Input::build(self.history.samples(), &self.snapshot, self.config.threshold_percent)
+    }
+
+    fn open_statistics(&mut self) {
+        if let Err(e) = statistics::open(self.hwnd, WM_APP_REFRESH_STATISTICS, self.statistics_input()) {
+            self.tray.notify(t().stats_title, &e);
+        }
+    }
+
+    /// New numbers for the statistics window, if it is open.
+    fn refresh_statistics(&mut self) {
+        if statistics::is_open() {
+            statistics::update(self.statistics_input());
         }
     }
 
@@ -391,6 +442,8 @@ impl App {
         if self.info.is_visible() {
             self.render_info();
         }
+        // Language and threshold show up in the statistics too.
+        self.refresh_statistics();
         Ok(())
     }
 
@@ -441,6 +494,7 @@ fn show_tray_menu(hwnd: HWND, at: POINT, mute: Option<bool>) -> usize {
         };
         let _ = AppendMenuW(menu, mute_flags, MENU_MUTE, &HSTRING::from(s.menu_mute));
         let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
+        let _ = AppendMenuW(menu, MF_STRING, MENU_STATISTICS, &HSTRING::from(s.menu_statistics));
         let _ = AppendMenuW(menu, MF_STRING, MENU_SETTINGS, &HSTRING::from(s.menu_settings));
         let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
         let _ = AppendMenuW(menu, MF_STRING, MENU_QUIT, &HSTRING::from(s.menu_quit));
@@ -470,6 +524,9 @@ fn run_menu_command(hwnd: HWND, cmd: usize) {
         }
         MENU_MUTE => {
             with_app(|a| a.toggle_mute());
+        }
+        MENU_STATISTICS => {
+            with_app(|a| a.open_statistics());
         }
         MENU_SETTINGS => open_settings(hwnd),
         MENU_QUIT => unsafe {
@@ -503,6 +560,8 @@ extern "system" fn main_wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
             open_settings(hwnd);
             true
         }
+        WM_APP_OPEN_STATISTICS => with_app(|a| a.open_statistics()).is_some(),
+        WM_APP_REFRESH_STATISTICS => with_app(|a| a.refresh_statistics()).is_some(),
         WM_APP_TRAY => {
             // NOTIFYICON_VERSION_4: event in LOWORD(lparam), anchor point in wparam.
             let event = (lparam.0 & 0xFFFF) as u32;

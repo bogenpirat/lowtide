@@ -64,3 +64,24 @@
 #define IDC_L_INFO_MARGIN       1422
 #define IDC_L_OFFSET_X          1423
 #define IDC_L_SHOW_FOR          1424
+
+// Statistics window (src/ui/statistics.rs, module `ids`)
+#define IDD_STATISTICS          101
+#define IDC_S_DEVICE            2001
+#define IDC_S_CURRENT           2002
+#define IDC_S_LASTS             2003
+#define IDC_S_ALERT             2004
+#define IDC_S_FULL              2005
+#define IDC_S_BASIS             2006
+#define IDC_S_TABLE             2007
+#define IDC_S_LAST_CHARGE       2008
+#define IDC_S_BETWEEN           2009
+#define IDC_S_CHARGE_TIME       2010
+#define IDC_S_LOWEST            2011
+#define IDC_S_SINCE             2012
+#define IDC_S_CHART             2013
+#define IDC_S_L_DEVICE          2101
+#define IDC_S_L_FORECAST        2102
+#define IDC_S_L_USAGE           2103
+#define IDC_S_L_CHARGING        2104
+#define IDC_S_L_CHART           2105

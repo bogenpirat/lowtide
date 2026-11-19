@@ -295,11 +295,21 @@ fn warn(hwnd: HWND, text: &str) {
 
 // ---- reading and writing controls -------------------------------------------------------
 
-fn send(hwnd: HWND, id: i32, msg: u32, wparam: usize, lparam: isize) -> isize {
+/// Give a dialog the app icon (title bar and Alt-Tab).
+pub(super) fn set_app_icon(hwnd: HWND) {
+    unsafe {
+        if let Ok(icon) = LoadIconW(GetModuleHandleW(None).ok().map(Into::into), PCWSTR(ids::IDI_APP as usize as *const u16)) {
+            SendMessageW(hwnd, WM_SETICON, Some(WPARAM(ICON_BIG as usize)), Some(LPARAM(icon.0 as isize)));
+            SendMessageW(hwnd, WM_SETICON, Some(WPARAM(ICON_SMALL as usize)), Some(LPARAM(icon.0 as isize)));
+        }
+    }
+}
+
+pub(super) fn send(hwnd: HWND, id: i32, msg: u32, wparam: usize, lparam: isize) -> isize {
     unsafe { SendDlgItemMessageW(hwnd, id, msg, WPARAM(wparam), LPARAM(lparam)).0 }
 }
 
-fn set_text(hwnd: HWND, id: i32, text: &str) {
+pub(super) fn set_text(hwnd: HWND, id: i32, text: &str) {
     let wide: Vec<u16> = text.encode_utf16().chain(Some(0)).collect();
     unsafe {
         let _ = SetDlgItemTextW(hwnd, id, PCWSTR(wide.as_ptr()));
@@ -476,12 +486,7 @@ fn read_style(hwnd: HWND, base: i32, s: &mut TextStyle) -> Result<(), (i32, Stri
 
 fn init_controls(hwnd: HWND, state: &mut State) {
     let c = &state.cfg;
-    unsafe {
-        if let Ok(icon) = LoadIconW(GetModuleHandleW(None).ok().map(Into::into), PCWSTR(ids::IDI_APP as usize as *const u16)) {
-            SendMessageW(hwnd, WM_SETICON, Some(WPARAM(ICON_BIG as usize)), Some(LPARAM(icon.0 as isize)));
-            SendMessageW(hwnd, WM_SETICON, Some(WPARAM(ICON_SMALL as usize)), Some(LPARAM(icon.0 as isize)));
-        }
-    }
+    set_app_icon(hwnd);
     set_int(hwnd, ids::THRESHOLD, ids::THRESHOLD_SPIN, c.threshold_percent.into(), 0, 100);
     set_check(hwnd, ids::SUPPRESS, c.suppress_while_charging);
     set_int(hwnd, ids::POLL, ids::POLL_SPIN, c.poll_interval_s as i32, 5, 3600);
